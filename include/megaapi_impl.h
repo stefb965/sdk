@@ -251,6 +251,7 @@ class MegaTransferPrivate : public MegaTransfer
 		void setPath(const char* path);
 		void setParentPath(const char* path);
         void setNodeHandle(MegaHandle nodeHandle);
+        void setRubbishHandle(MegaHandle nodeHandle);
         void setParentHandle(MegaHandle parentHandle);
 		void setNumConnections(int connections);
 		void setStartPos(long long startPos);
@@ -281,6 +282,7 @@ class MegaTransferPrivate : public MegaTransfer
 		virtual const char* getParentPath() const;
         virtual MegaHandle getNodeHandle() const;
         virtual MegaHandle getParentHandle() const;
+        virtual MegaHandle getRubbishHandle() const;
 		virtual long long getStartPos() const;
 		virtual long long getEndPos() const;
 		virtual const char* getFileName() const;
@@ -312,6 +314,7 @@ class MegaTransferPrivate : public MegaTransfer
 		long long deltaSize;
         MegaHandle nodeHandle;
         MegaHandle parentHandle;
+        MegaHandle rubbishHandle;
 		const char* path;
 		const char* parentPath;
 		const char* fileName;
@@ -775,11 +778,13 @@ struct MegaFilePut : public MegaFile
 {
     void completed(Transfer* t, LocalNode*);
     void terminated();
-    MegaFilePut(MegaClient *client, string* clocalname, string *filename, handle ch, const char* ctargetuser, int64_t mtime = -1);
+    MegaFilePut(MegaClient *client, string* clocalname, string *filename, handle ch, const char* ctargetuser, int64_t mtime = -1, handle nodeToMove = UNDEF, handle destinationForMove = UNDEF);
     ~MegaFilePut() {}
 
 protected:
     int64_t customMtime;
+    handle nodeToMove;
+    handle destinationForMove;
 };
 
 class TreeProcessor
@@ -999,7 +1004,8 @@ class MegaApiImpl : public MegaApp
         void startUpload(const char* localPath, MegaNode *parent, MegaTransferListener *listener=NULL);
         void startUpload(const char* localPath, MegaNode *parent, int64_t mtime, MegaTransferListener *listener=NULL);
         void startUpload(const char* localPath, MegaNode* parent, const char* fileName, MegaTransferListener *listener = NULL);
-        void startUpload(const char* localPath, MegaNode* parent, const char* fileName,  int64_t mtime, MegaTransferListener *listener = NULL);
+        void startUpload(const char* localPath, MegaNode* parent, const char* fileName,  int64_t mtime, MegaNode* nodeToMove, MegaNode *destinationForMove, MegaTransferListener *listener = NULL);
+        void startUploadAndMove(const char* localPath, MegaNode* destinationForUpload, MegaNode* nodeToMove, MegaNode *destinationForMove, MegaTransferListener *listener = NULL);
         void startDownload(MegaNode* node, const char* localPath, MegaTransferListener *listener = NULL);
         void startStreaming(MegaNode* node, m_off_t startPos, m_off_t size, MegaTransferListener *listener);
         void startPublicDownload(MegaNode* node, const char* localPath, MegaTransferListener *listener = NULL);

@@ -4598,6 +4598,23 @@ class MegaApi
         void startUpload(const char* localPath, MegaNode* parent, const char* fileName, int64_t mtime, MegaTransferListener *listener = NULL);
 
         /**
+         * @brief Upload a file and move another one atomically
+         *
+         * Just at the same time that the upload is completed, the nodeToMove
+         * is moved to the folder destinationForMove.
+         *
+         * This is useful when you want to replace a file with another one
+         * without suffering race conditions.
+         *
+         * @param localPath Local path of the file
+         * @param destinationForUpload Parent node for the file in the MEGA account
+         * @param nodeToMove Node to move when the upload is about to be completed
+         * @param destinationForMove Destination node for the moved file
+         * @param listener MegaTransferListener to track this transfer
+         */
+        void startUploadAndMove(const char* localPath, MegaNode* destinationForUpload, MegaNode* nodeToMove, MegaNode *destinationForMove, MegaTransferListener *listener = NULL);
+
+        /**
          * @brief Download a file from MEGA
          * @param node MegaNode that identifies the file
          * @param localPath Destination path for the file

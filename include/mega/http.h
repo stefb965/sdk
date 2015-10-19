@@ -207,6 +207,7 @@ struct MEGA_API HttpReqXfer : public HttpReq
 struct MEGA_API HttpReqUL : public HttpReqXfer
 {
     bool prepare(FileAccess*, const char*, SymmCipher*, chunkmac_map*, uint64_t, m_off_t, m_off_t);
+    bool prepare(InputStreamAccess*, const char*, SymmCipher*, chunkmac_map*, uint64_t, m_off_t, m_off_t);
 
     m_off_t transferred(MegaClient*);
 

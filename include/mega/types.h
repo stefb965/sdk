@@ -65,6 +65,7 @@ struct DirectRead;
 struct DirectReadNode;
 struct DirectReadSlot;
 struct FileAccess;
+struct InputStreamAccess;
 struct FileAttributeFetch;
 struct FileAttributeFetchChannel;
 struct FileFingerprint;

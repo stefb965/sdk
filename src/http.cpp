@@ -338,6 +338,37 @@ bool HttpReqUL::prepare(FileAccess* fa, const char* tempurl, SymmCipher* key,
     return true;
 }
 
+// prepare chunk for uploading: mac and encrypt
+bool HttpReqUL::prepare(InputStreamAccess* istream, const char* tempurl, SymmCipher* key,
+                        chunkmac_map* macs, uint64_t ctriv, m_off_t pos,
+                        m_off_t npos)
+{
+    size = (unsigned)(npos - pos);
+
+    int padding = (unsigned)(-(int)size) & (SymmCipher::BLOCKSIZE - 1);
+    out->resize(size + padding);
+    if(!istream->read((byte *)out->data(), size))
+    {
+        out->clear();
+        return false;
+    }
+
+    byte mac[SymmCipher::BLOCKSIZE] = { 0 };
+    char buf[256];
+
+    snprintf(buf, sizeof buf, "%s/%" PRIu64, tempurl, pos);
+    setreq(buf, REQ_BINARY);
+
+    key->ctr_crypt((byte*)out->data(), size, pos, ctriv, mac, 1);
+
+    memcpy((*macs)[pos].mac, mac, sizeof mac);
+
+    // unpad for POSTing
+    out->resize(size);
+
+    return true;
+}
+
 // number of bytes sent in this request
 m_off_t HttpReqUL::transferred(MegaClient* client)
 {

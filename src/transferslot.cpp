@@ -341,9 +341,21 @@ void TransferSlot::doio(MegaClient* client)
                         }
                     }
 
-                    if (reqs[i]->prepare(fa, finaltempurl.c_str(), &transfer->key,
+                    bool result;
+                    if (transfer->type == PUT && transfer->inputstream)
+                    {
+                        result = ((HttpReqUL *)reqs[i])->prepare(transfer->inputstream, finaltempurl.c_str(), &transfer->key,
+                                                  &transfer->chunkmacs, transfer->ctriv,
+                                                  transfer->pos, npos);
+                    }
+                    else
+                    {
+                        result = reqs[i]->prepare(fa, finaltempurl.c_str(), &transfer->key,
                                          &transfer->chunkmacs, transfer->ctriv,
-                                         transfer->pos, npos))
+                                         transfer->pos, npos);
+                    }
+
+                    if (result)
                     {
                         reqs[i]->status = REQ_PREPARED;
                         transfer->pos = npos;
@@ -351,7 +363,7 @@ void TransferSlot::doio(MegaClient* client)
                     else
                     {
                         LOG_warn << "Error preparing transfer: " << fa->retry;
-                        if (!fa->retry)
+                        if (!fa->retry || transfer->inputstream)
                         {
                             return transfer->failed(API_EREAD);
                         }

@@ -92,6 +92,9 @@ struct MEGA_API Transfer : public FileFingerprint
 
     // previous wrong fingerprint
     FileFingerprint badfp;
+
+    // input stream to access the data of the file
+    InputStreamAccess *inputstream;
    
     Transfer(MegaClient*, direction_t);
     virtual ~Transfer();

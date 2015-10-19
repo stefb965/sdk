@@ -315,6 +315,7 @@ class MegaTransferPrivate : public MegaTransfer
         void setLastBytes(char *lastBytes);
         void setLastErrorCode(error errorCode);
         void setFolderTransferTag(int tag);
+        void setInputStream(InputStreamAccess *inputStream);
 
 		virtual int getType() const;
 		virtual const char * getTransferString() const;
@@ -347,34 +348,35 @@ class MegaTransferPrivate : public MegaTransfer
         virtual error getLastErrorCode() const;
         virtual bool isFolderTransfer() const;
         virtual int getFolderTransferTag() const;
+        virtual InputStreamAccess *getInputStream() const;
 
 	protected:		
-		int type;
-		int tag;
+        int type;
+        int tag;
         bool syncTransfer;
         int64_t startTime;
         int64_t updateTime;
         int64_t time;
-		long long transferredBytes;
-		long long totalBytes;
-		long long speed;
-		long long deltaSize;
+        long long transferredBytes;
+        long long totalBytes;
+        long long speed;
+        long long deltaSize;
         MegaHandle nodeHandle;
         MegaHandle parentHandle;
-		const char* path;
-		const char* parentPath;
-		const char* fileName;
+        const char* path;
+        const char* parentPath;
+        const char* fileName;
         char *lastBytes;
         MegaNode *publicNode;
-		long long startPos;
-		long long endPos;
-		int retry;
-		int maxRetries;
-
-		MegaTransferListener *listener;
+        long long startPos;
+        long long endPos;
+        int retry;
+        int maxRetries;
+        MegaTransferListener *listener;
         Transfer *transfer;
         error lastError;
         int folderTransferTag;
+        InputStreamAccess *inputStream;
 };
 
 class MegaContactRequestPrivate : public MegaContactRequest
@@ -825,7 +827,7 @@ struct MegaFilePut : public MegaFile
 {
     void completed(Transfer* t, LocalNode*);
     void terminated();
-    MegaFilePut(MegaClient *client, string* clocalname, string *filename, handle ch, const char* ctargetuser, int64_t mtime = -1);
+    MegaFilePut(MegaClient *client, string* clocalname, string *filename, handle ch, const char* ctargetuser, int64_t mtime = -1,  InputStreamAccess *inputstream = NULL);
     ~MegaFilePut() {}
 
 protected:
@@ -1049,7 +1051,8 @@ class MegaApiImpl : public MegaApp
         void startUpload(const char* localPath, MegaNode *parent, MegaTransferListener *listener=NULL);
         void startUpload(const char* localPath, MegaNode *parent, int64_t mtime, MegaTransferListener *listener=NULL);
         void startUpload(const char* localPath, MegaNode* parent, const char* fileName, MegaTransferListener *listener = NULL);
-        void startUpload(const char* localPath, MegaNode* parent, const char* fileName,  int64_t mtime, int folderTransferTag = 0, MegaTransferListener *listener = NULL);
+        void startUpload(MegaInputStream* inputStream, MegaNode* parent, const char* fileName, int64_t mtime, MegaTransferListener *listener = NULL);
+        void startUpload(const char* localPath, MegaNode* parent, const char* fileName,  int64_t mtime, int folderTransferTag = 0, MegaInputStream *inputStream = NULL, MegaTransferListener *listener = NULL);
         void startDownload(MegaNode* node, const char* localPath, MegaTransferListener *listener = NULL);
         void startStreaming(MegaNode* node, m_off_t startPos, m_off_t size, MegaTransferListener *listener);
         void startPublicDownload(MegaNode* node, const char* localPath, MegaTransferListener *listener = NULL);

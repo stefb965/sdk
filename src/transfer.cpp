@@ -40,6 +40,7 @@ Transfer::Transfer(MegaClient* cclient, direction_t ctype)
     metamac = 0;
     tag = 0;
     slot = NULL;
+    inputstream = NULL;
     
     faputcompletion_it = client->faputcompletion.end();
 }
@@ -81,11 +82,14 @@ void Transfer::failed(error e)
 
     client->app->transfer_failed(this, e);
 
-    for (file_list::iterator it = files.begin(); it != files.end(); it++)
+    if (!inputstream)
     {
-        if ((*it)->failed(e) && !defer)
+        for (file_list::iterator it = files.begin(); it != files.end(); it++)
         {
-            defer = true;
+            if ((*it)->failed(e) && !defer)
+            {
+                defer = true;
+            }
         }
     }
 
@@ -426,7 +430,7 @@ void Transfer::complete()
     else
     {
         // files must not change during a PUT transfer
-        if (genfingerprint(slot->fa, true))
+        if (!inputstream && genfingerprint(slot->fa, true))
         {
             return failed(API_EREAD);
         }

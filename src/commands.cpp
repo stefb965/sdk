@@ -212,7 +212,9 @@ CommandPutFile::CommandPutFile(TransferSlot* ctslot, int ms)
     tslot = ctslot;
 
     cmd("u");
-    arg("s", tslot->fa->size);
+    arg("s", tslot->transfer->inputstream ?
+            tslot->transfer->inputstream->size() :
+            tslot->fa->size);
     arg("ms", ms);
 }
 

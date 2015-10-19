@@ -1472,7 +1472,12 @@ void MegaApi::startUpload(const char* localPath, MegaNode* parent, const char* f
 
 void MegaApi::startUpload(const char *localPath, MegaNode *parent, const char *fileName, int64_t mtime, MegaTransferListener *listener)
 {
-    pImpl->startUpload(localPath, parent, fileName, mtime, 0, listener);
+    pImpl->startUpload(localPath, parent, fileName, mtime, 0, NULL, listener);
+}
+
+void MegaApi::startUpload(MegaInputStream *inputStream, MegaNode *parent, const char *fileName, int64_t mtime, MegaTransferListener *listener)
+{
+    pImpl->startUpload(inputStream, parent, fileName, mtime, listener);
 }
 
 void MegaApi::startDownload(MegaNode *node, const char* localFolder, MegaTransferListener *listener)

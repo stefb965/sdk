@@ -2030,15 +2030,15 @@ bool MegaClient::dispatch(direction_t d)
         }
 
         // verify that a local path was given and start/resume transfer
-        if (nextit->second->localfilename.size())
+        if (nextit->second->localfilename.size() || nextit->second->inputstream)
         {
             // allocate transfer slot
             ts = new TransferSlot(nextit->second);
 
             // try to open file (PUT transfers: open in nonblocking mode)
-            if ((d == PUT)
+            if (nextit->second->inputstream || ((d == PUT)
               ? ts->fa->fopen(&nextit->second->localfilename)
-              : ts->fa->fopen(&nextit->second->localfilename, false, true))
+              : ts->fa->fopen(&nextit->second->localfilename, false, true)))
             {
                 handle h = UNDEF;
                 bool hprivate = true;
@@ -2049,7 +2049,8 @@ bool MegaClient::dispatch(direction_t d)
                 // always (re)start upload from scratch
                 if (d == PUT)
                 {
-                    nextit->second->size = ts->fa->size;
+                    nextit->second->size =  nextit->second->inputstream ?
+                                nextit->second->inputstream->size() : ts->fa->size;
                     nextit->second->chunkmacs.clear();
 
                     // create thumbnail/preview imagery, if applicable (FIXME: do not re-create upon restart)
@@ -8414,7 +8415,7 @@ bool MegaClient::startxfer(direction_t d, File* f, bool skipdupes)
     {
         if (d == PUT)
         {
-            if (!f->isvalid)    // (sync LocalNodes always have this set)
+            if (!f->isvalid && !f->inputstream)    // (sync LocalNodes always have this set)
             {
                 // missing FileFingerprint for local file - generate
                 FileAccess* fa = fsaccess->newfileaccess();
@@ -8428,19 +8429,17 @@ bool MegaClient::startxfer(direction_t d, File* f, bool skipdupes)
             }
 
             // if we are unable to obtain a valid file FileFingerprint, don't proceed
-            if (!f->isvalid)
+            if (!f->isvalid && !f->inputstream)
             {
                 LOG_err << "Unable to get a fingerprint " << f->name;
                 return false;
             }
-        }
-        else
+        }        
+
+        if (!f->isvalid)
         {
-            if (!f->isvalid)
-            {
-                // no valid fingerprint: use filekey as its replacement
-                memcpy(f->crc, f->filekey, sizeof f->crc);
-            }
+            // no valid fingerprint: use filekey as its replacement
+            memcpy(f->crc, f->filekey, sizeof f->crc);
         }
 
         Transfer* t;
@@ -8473,6 +8472,7 @@ bool MegaClient::startxfer(direction_t d, File* f, bool skipdupes)
             t->size = f->size;
             t->tag = reqtag;
             t->transfers_it = transfers[d].insert(pair<FileFingerprint*, Transfer*>((FileFingerprint*)t, t)).first;
+            t->inputstream = f->inputstream;
             app->transfer_added(t);
         }
 

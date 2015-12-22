@@ -25,6 +25,7 @@
 #include "mega/megaclient.h"
 #include "mega/sync.h"
 #include "mega/command.h"
+#include "mega/logging.h"
 
 namespace mega {
 File::File()
@@ -207,6 +208,7 @@ void SyncFileGet::prepare()
 
             for (i = 3; i--;)
             {
+                LOG_verbose << "Creating tmp folder";
                 transfer->localfilename = sync->localdebris;
                 sync->client->fsaccess->mkdirlocal(&transfer->localfilename, true);
 

@@ -265,6 +265,7 @@ void TransferSlot::doio(MegaClient* client)
 
                         // fixed ten-minute retry intervals
                         backoff = 6000;
+                        retrying = true;
                     }
                     else
                     {
@@ -286,6 +287,7 @@ void TransferSlot::doio(MegaClient* client)
                                 changeport = true;
                             }
 
+                            client->app->transfer_failed(transfer, API_EFAILED);
                             client->setchunkfailed(&reqs[i]->posturl);
 
                             if (changeport)
@@ -293,9 +295,8 @@ void TransferSlot::doio(MegaClient* client)
                                 toggleport(reqs[i]);
                             }
                         }
-
-                        reqs[i]->status = REQ_PREPARED;
                     }
+                    reqs[i]->status = REQ_PREPARED;
 
                 default:
                     ;

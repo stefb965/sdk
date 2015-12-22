@@ -92,7 +92,12 @@ class MegaGfxProc : public GfxProcExternal {};
 
 #ifdef WIN32
     #ifndef WINDOWS_PHONE
+    #ifdef USE_CURL
+    class MegaHttpIO : public CurlHttpIO {};
+    #else
     class MegaHttpIO : public WinHttpIO {};
+    #endif
+
     class MegaFileSystemAccess : public WinFileSystemAccess {};
     class MegaWaiter : public WinWaiter {};
     #else
@@ -168,11 +173,15 @@ class MegaNodePrivate : public MegaNode
     public:
         MegaNodePrivate(const char *name, int type, int64_t size, int64_t ctime, int64_t mtime,
                         MegaHandle nodeMegaHandle, std::string *nodekey, std::string *attrstring,
-                        MegaHandle parentHandle = INVALID_HANDLE, const char*auth = NULL);
+                        const char *fingerprint, MegaHandle parentHandle = INVALID_HANDLE, const char*auth = NULL);
         MegaNodePrivate(MegaNode *node);
         virtual ~MegaNodePrivate();
         virtual int getType();
         virtual const char* getName();
+        virtual const char* getFingerprint();
+        virtual bool hasCustomAttrs();
+        MegaStringList *getCustomAttrNames();
+        virtual const char *getCustomAttr(const char* attrName);
         virtual char *getBase64Handle();
         virtual int64_t getSize();
         virtual int64_t getCreationTime();
@@ -215,6 +224,8 @@ class MegaNodePrivate : public MegaNode
         MegaNodePrivate(Node *node);
         int type;
         const char *name;
+        const char *fingerprint;
+        attr_map *customAttrs;
         int64_t size;
         int64_t ctime;
         int64_t mtime;
@@ -251,13 +262,16 @@ class MegaUserPrivate : public MegaUser
 
 		~MegaUserPrivate();
 		virtual const char* getEmail();
-		virtual int getVisibility();
-		virtual time_t getTimestamp();
+        virtual int getVisibility();
+        virtual int64_t getTimestamp();
+        virtual bool hasChanged(int changeType);
+        virtual int getChanges();
 
 	protected:
 		const char *email;
-		int visibility;
-		time_t ctime;
+        int visibility;
+        int64_t ctime;
+        int changed;
 };
 
 class MegaSharePrivate : public MegaShare
@@ -726,6 +740,23 @@ private:
     vector<const char *> androidId;
 };
 
+class MegaStringListPrivate : public MegaStringList
+{
+public:
+    MegaStringListPrivate();
+    MegaStringListPrivate(char **newlist, int size);
+    virtual ~MegaStringListPrivate();
+    virtual MegaStringList *copy();
+    virtual const char* get(int i);
+    virtual int size();
+
+
+protected:
+    MegaStringListPrivate(MegaStringListPrivate *stringList);
+    const char** list;
+    int s;
+};
+
 class MegaNodeListPrivate : public MegaNodeList
 {
 	public:
@@ -987,6 +1018,7 @@ class MegaApiImpl : public MegaApp
         int isLoggedIn();
         char* getMyEmail();
         char* getMyUserHandle();
+        char* getMyXMPPJid();
         static void setLogLevel(int logLevel);
         static void setLoggerClass(MegaLogger *megaLogger);
         static void log(int logLevel, const char* message, const char *filename = NULL, int line = -1);
@@ -1015,6 +1047,7 @@ class MegaApiImpl : public MegaApp
         void setAvatar(const char *dstFilePath, MegaRequestListener *listener = NULL);
         void getUserAttribute(MegaUser* user, int type, MegaRequestListener *listener = NULL);
         void setUserAttribute(int type, const char* value, MegaRequestListener *listener = NULL);
+        void setCustomNodeAttribute(MegaNode *node, const char *attrName, const char *value, MegaRequestListener *listener = NULL);
         void exportNode(MegaNode *node, int64_t expireTime, MegaRequestListener *listener = NULL);
         void disableExport(MegaNode *node, MegaRequestListener *listener = NULL);
         void fetchNodes(MegaRequestListener *listener = NULL);
@@ -1121,6 +1154,7 @@ class MegaApiImpl : public MegaApp
         MegaUser* getContact(const char* email);
         MegaNodeList *getInShares(MegaUser* user);
         MegaNodeList *getInShares();
+        MegaShareList *getInSharesList();
         bool isPendingShare(MegaNode *node);
         MegaShareList *getOutShares();
         MegaShareList *getOutShares(MegaNode *node);
@@ -1151,6 +1185,7 @@ class MegaApiImpl : public MegaApp
         MegaError checkAccess(MegaNode* node, int level);
         MegaError checkMove(MegaNode* node, MegaNode* target);
 
+        bool isFilesystemAvailable();
         MegaNode *getRootNode();
         MegaNode* getInboxNode();
         MegaNode *getRubbishNode();

@@ -68,16 +68,14 @@
 #include <openssl/rand.h>
 #endif
 
-#ifdef WINDOWS_PHONE
-const char* inet_ntop(int af, const void* src, char* dst, int cnt);
-#endif
-
 using namespace mega;
 
-MegaNodePrivate::MegaNodePrivate(const char *name, int type, int64_t size, int64_t ctime, int64_t mtime, uint64_t nodehandle, string *nodekey, string *attrstring, MegaHandle parentHandle, const char*auth)
+MegaNodePrivate::MegaNodePrivate(const char *name, int type, int64_t size, int64_t ctime, int64_t mtime, uint64_t nodehandle, string *nodekey, string *attrstring, const char *fingerprint, MegaHandle parentHandle, const char*auth)
 : MegaNode()
 {
     this->name = MegaApi::strdup(name);
+    this->fingerprint = MegaApi::strdup(fingerprint);
+    this->customAttrs = NULL;
     this->type = type;
     this->size = size;
     this->ctime = ctime;
@@ -109,6 +107,8 @@ MegaNodePrivate::MegaNodePrivate(MegaNode *node)
 : MegaNode()
 {
     this->name = MegaApi::strdup(node->getName());
+    this->fingerprint = MegaApi::strdup(node->getFingerprint());
+    this->customAttrs = NULL;
     this->type = node->getType();
     this->size = node->getSize();
     this->ctime = node->getCreationTime();
@@ -134,6 +134,17 @@ MegaNodePrivate::MegaNodePrivate(MegaNode *node)
     else
         this->plink = NULL;
 
+    if (node->hasCustomAttrs())
+    {
+        this->customAttrs = new attr_map();
+        MegaStringList *names = node->getCustomAttrNames();
+        for (int i = 0; i < names->size(); i++)
+        {
+            (*customAttrs)[AttrMap::string2nameid(names->get(i))] = node->getCustomAttr(names->get(i));
+        }
+        delete names;
+    }
+
 #ifdef ENABLE_SYNC
     this->syncdeleted = node->isSyncDeleted();
     this->localPath = node->getLocalPath();
@@ -144,6 +155,44 @@ MegaNodePrivate::MegaNodePrivate(Node *node)
 : MegaNode()
 {
     this->name = MegaApi::strdup(node->displayname());
+    this->fingerprint = NULL;
+
+    if (node->isvalid)
+    {
+        string fingerprint;
+        node->serializefingerprint(&fingerprint);
+        m_off_t size = node->size;
+        char bsize[sizeof(size)+1];
+        int l = Serialize64::serialize((byte *)bsize, size);
+        char *buf = new char[l * 4 / 3 + 4];
+        char ssize = 'A' + Base64::btoa((const byte *)bsize, l, buf);
+        string result(1, ssize);
+        result.append(buf);
+        result.append(fingerprint);
+        delete [] buf;
+
+        this->fingerprint = MegaApi::strdup(result.c_str());
+    }
+
+    this->customAttrs = NULL;
+
+    char buf[10];
+    for (attr_map::iterator it = node->attrs.map.begin(); it != node->attrs.map.end(); it++)
+    {
+       buf[0] = 0;
+       node->attrs.nameid2string(it->first, buf);
+       if (buf[0] == '_')
+       {
+           if (!customAttrs)
+           {
+               customAttrs = new attr_map();
+           }
+
+           nameid id = AttrMap::string2nameid(&buf[1]);
+           (*customAttrs)[id] = it->second;
+       }
+    }
+
     this->type = node->type;
     this->size = node->size;
     this->ctime = node->ctime;
@@ -252,6 +301,56 @@ const char* MegaNodePrivate::getName()
     }
 }
 
+const char *MegaNodePrivate::getFingerprint()
+{
+    return fingerprint;
+}
+
+bool MegaNodePrivate::hasCustomAttrs()
+{
+    return customAttrs != NULL;
+}
+
+MegaStringList *MegaNodePrivate::getCustomAttrNames()
+{
+    if (!customAttrs)
+    {
+        return new MegaStringList();
+    }
+
+    vector<char*> names;
+    char *buf;
+    for (attr_map::iterator it = customAttrs->begin(); it != customAttrs->end(); it++)
+    {
+        buf = new char[10];
+        AttrMap::nameid2string(it->first, buf);
+        names.push_back(buf);
+    }
+    return new MegaStringListPrivate(names.data(), names.size());
+}
+
+const char *MegaNodePrivate::getCustomAttr(const char *attrName)
+{
+    if (!customAttrs)
+    {
+        return NULL;
+    }
+
+    nameid n = AttrMap::string2nameid(attrName);
+    if (!n)
+    {
+        return NULL;
+    }
+
+    attr_map::iterator it = customAttrs->find(n);
+    if (it == customAttrs->end())
+    {
+        return NULL;
+    }
+
+    return it->second.c_str();
+}
+
 int64_t MegaNodePrivate::getSize()
 {
 	return size;
@@ -328,7 +427,7 @@ MegaNode* MegaNodePrivate::getPublicNode()
 
     MegaNode *node = new MegaNodePrivate(
                 name, type, size, ctime, mtime,
-                plink->ph, &key, &attrstring);
+                plink->ph, &key, &attrstring, fingerprint);
 
     delete [] skey;
 
@@ -587,7 +686,9 @@ string *MegaNodePrivate::getAuth()
 
 MegaNodePrivate::~MegaNodePrivate()
 {
- 	delete[] name;
+    delete[] name;
+    delete [] fingerprint;
+    delete customAttrs;
     delete plink;
 }
 
@@ -596,6 +697,27 @@ MegaUserPrivate::MegaUserPrivate(User *user) : MegaUser()
     email = MegaApi::strdup(user->email.c_str());
 	visibility = user->show;
 	ctime = user->ctime;
+    changed = 0;
+    if (user->changed.auth)
+    {
+        changed |= MegaUser::CHANGE_TYPE_AUTH;
+    }
+    if(user->changed.avatar)
+    {
+        changed |= MegaUser::CHANGE_TYPE_AVATAR;
+    }
+    if(user->changed.lstint)
+    {
+        changed |= MegaUser::CHANGE_TYPE_LSTINT;
+    }
+    if(user->changed.firstname)
+    {
+        changed |= MegaUser::CHANGE_TYPE_FIRSTNAME;
+    }
+    if(user->changed.lastname)
+    {
+        changed |= MegaUser::CHANGE_TYPE_LASTNAME;
+    }
 }
 
 MegaUserPrivate::MegaUserPrivate(MegaUser *user) : MegaUser()
@@ -603,6 +725,7 @@ MegaUserPrivate::MegaUserPrivate(MegaUser *user) : MegaUser()
 	email = MegaApi::strdup(user->getEmail());
 	visibility = user->getVisibility();
 	ctime = user->getTimestamp();
+    changed = user->getChanges();
 }
 
 MegaUser *MegaUserPrivate::fromUser(User *user)
@@ -634,9 +757,19 @@ int MegaUserPrivate::getVisibility()
 	return visibility;
 }
 
-time_t MegaUserPrivate::getTimestamp()
+int64_t MegaUserPrivate::getTimestamp()
 {
 	return ctime;
+}
+
+bool MegaUserPrivate::hasChanged(int changeType)
+{
+    return (changed & changeType);
+}
+
+int MegaUserPrivate::getChanges()
+{
+    return changed;
 }
 
 
@@ -1693,6 +1826,7 @@ const char *MegaRequestPrivate::getRequestString() const
         case TYPE_SUBMIT_FEEDBACK: return "SUBMIT_FEEDBACK";
         case TYPE_SEND_EVENT: return "SEND_EVENT";
         case TYPE_CLEAN_RUBBISH_BIN: return "CLEAN_RUBBISH_BIN";
+        case TYPE_SET_ATTR_NODE: return "SET_ATTR_NODE";
 	}
     return "UNKNOWN";
 }
@@ -1720,6 +1854,68 @@ const char *MegaRequestPrivate::__str__() const
 const char *MegaRequestPrivate::__toString() const
 {
 	return getRequestString();
+}
+
+MegaStringListPrivate::MegaStringListPrivate()
+{
+    list = NULL;
+    s = 0;
+}
+
+MegaStringListPrivate::MegaStringListPrivate(MegaStringListPrivate *stringList)
+{
+    s = stringList->size();
+    if (!s)
+    {
+        list = NULL;
+        return;
+    }
+
+    list = new const char*[s];
+    for (int i = 0; i < s; i++)
+        list[i] = MegaApi::strdup(stringList->get(i));
+}
+
+MegaStringListPrivate::MegaStringListPrivate(char **newlist, int size)
+{
+    list = NULL;
+    s = size;
+    if (!size)
+    {
+        return;
+    }
+
+    list = new const char*[size];
+    for (int i = 0; i < size; i++)
+        list[i] = newlist[i];
+}
+
+MegaStringListPrivate::~MegaStringListPrivate()
+{
+    if(!list)
+        return;
+
+    for(int i=0; i<s; i++)
+        delete [] list[i];
+    delete [] list;
+}
+
+MegaStringList *MegaStringListPrivate::copy()
+{
+    return new MegaStringListPrivate(this);
+}
+
+const char *MegaStringListPrivate::get(int i)
+{
+    if(!list || (i < 0) || (i >= s))
+        return NULL;
+
+    return list[i];
+}
+
+int MegaStringListPrivate::size()
+{
+    return s;
 }
 
 MegaNodeListPrivate::MegaNodeListPrivate()
@@ -2312,9 +2508,8 @@ char* MegaApiImpl::getMyEmail()
 
 char *MegaApiImpl::getMyUserHandle()
 {
-    User* u;
     sdkMutex.lock();
-    if (!client->loggedin() || !(u = client->finduser(client->me)))
+    if (ISUNDEF(client->me))
     {
         sdkMutex.unlock();
         return NULL;
@@ -2323,6 +2518,23 @@ char *MegaApiImpl::getMyUserHandle()
     char buf[12];
     Base64::btoa((const byte*)&client->me, MegaClient::USERHANDLE, buf);
     char *result = MegaApi::strdup(buf);
+    sdkMutex.unlock();
+    return result;
+}
+
+char *MegaApiImpl::getMyXMPPJid()
+{
+    sdkMutex.lock();
+    if (ISUNDEF(client->me))
+    {
+        sdkMutex.unlock();
+        return NULL;
+    }
+
+    char jid[16];
+    Base32::btoa((const byte *)&client->me, MegaClient::USERHANDLE, jid);
+    char *result = MegaApi::strdup(jid);
+
     sdkMutex.unlock();
     return result;
 }
@@ -2626,7 +2838,12 @@ void MegaApiImpl::setProxySettings(MegaProxy *proxySettings)
         url = proxySettings->getProxyURL();
 
     string localurl;
+
+#if defined(WINDOWS_PHONE) || (defined(_WIN32) && defined(USE_CURL))
+    localurl = url;
+#else
     fsAccess->path2local(&url, &localurl);
+#endif
 
     localProxySettings.setProxyURL(&localurl);
 
@@ -2637,14 +2854,24 @@ void MegaApiImpl::setProxySettings(MegaProxy *proxySettings)
             username = proxySettings->getUsername();
 
         string localusername;
+
+#if defined(WINDOWS_PHONE) || (defined(_WIN32) && defined(USE_CURL))
+        localusername = username;
+#else
         fsAccess->path2local(&username, &localusername);
+#endif
 
         string password;
         if(proxySettings->getPassword())
             password = proxySettings->getPassword();
 
         string localpassword;
+
+#if defined(WINDOWS_PHONE) || (defined(_WIN32) && defined(USE_CURL))
+        localpassword = password;
+#else
         fsAccess->path2local(&password, &localpassword);
+#endif
 
         localProxySettings.setCredentials(&localusername, &localpassword);
     }
@@ -2682,26 +2909,7 @@ void MegaApiImpl::loop()
     while (true)
     {
     #ifdef WINDOWS_PHONE
-        struct hostent *hp;
-        hp = gethostbyname("ns.mega.co.nz");
-        if (hp != NULL && hp->h_addr != NULL)
-        {
-            struct in_addr **addr_list;
-            addr_list = (struct in_addr **)hp->h_addr_list;
-            for (int i = 0; addr_list[i] != NULL; i++)
-            {
-                char str[INET_ADDRSTRLEN];
-                const char *ip = inet_ntop(AF_INET, addr_list[i], str, INET_ADDRSTRLEN);
-                if(ip == str)
-                {
-                    if (servers.size())
-                    {
-                        servers.append(",");
-                    }
-                    servers.append(ip);
-                }
-            }
-        }
+        client->httpio->getMEGADNSservers(&servers);
     #else
         __res_state res;
         if(res_ninit(&res) == 0)
@@ -2716,12 +2924,12 @@ void MegaApiImpl::loop()
 
                 if(u[i].sin.sin_family == PF_INET)
                 {
-                    inet_ntop(PF_INET, &u[i].sin.sin_addr, straddr, sizeof(straddr));
+                    mega_inet_ntop(PF_INET, &u[i].sin.sin_addr, straddr, sizeof(straddr));
                 }
 
                 if(u[i].sin6.sin6_family == PF_INET6)
                 {
-                    inet_ntop(PF_INET6, &u[i].sin6.sin6_addr, straddr, sizeof(straddr));
+                    mega_inet_ntop(PF_INET6, &u[i].sin6.sin6_addr, straddr, sizeof(straddr));
                 }
 
                 if(straddr[0])
@@ -2803,16 +3011,10 @@ void MegaApiImpl::moveNode(MegaNode *node, MegaNode *newParent, MegaRequestListe
 void MegaApiImpl::copyNode(MegaNode *node, MegaNode* target, MegaRequestListener *listener)
 {
 	MegaRequestPrivate *request = new MegaRequestPrivate(MegaRequest::TYPE_COPY, listener);
-    if(node)
+    if (node)
     {
-        if(node->isPublic())
-        {
-            request->setPublicNode(node);
-        }
-        else
-        {
-            request->setNodeHandle(node->getHandle());
-        }
+        request->setPublicNode(node);
+        request->setNodeHandle(node->getHandle());
     }
     if(target) request->setParentHandle(target->getHandle());
 	requestQueue.push(request);
@@ -2822,16 +3024,10 @@ void MegaApiImpl::copyNode(MegaNode *node, MegaNode* target, MegaRequestListener
 void MegaApiImpl::copyNode(MegaNode *node, MegaNode *target, const char *newName, MegaRequestListener *listener)
 {
     MegaRequestPrivate *request = new MegaRequestPrivate(MegaRequest::TYPE_COPY, listener);
-    if(node)
+    if (node)
     {
-        if(node->isPublic())
-        {
-            request->setPublicNode(node);
-        }
-        else
-        {
-            request->setNodeHandle(node->getHandle());
-        }
+        request->setPublicNode(node);
+        request->setNodeHandle(node->getHandle());
     }
     if(target) request->setParentHandle(target->getHandle());
     request->setName(newName);
@@ -2871,7 +3067,11 @@ void MegaApiImpl::sendFileToUser(MegaNode *node, MegaUser *user, MegaRequestList
 void MegaApiImpl::sendFileToUser(MegaNode *node, const char* email, MegaRequestListener *listener)
 {
 	MegaRequestPrivate *request = new MegaRequestPrivate(MegaRequest::TYPE_COPY, listener);
-    if(node) request->setNodeHandle(node->getHandle());
+    if (node)
+    {
+        request->setPublicNode(node);
+        request->setNodeHandle(node->getHandle());
+    }
     request->setEmail(email);
 	requestQueue.push(request);
     waiter->notify();
@@ -2950,12 +3150,12 @@ void MegaApiImpl::setPreview(MegaNode* node, const char *srcFilePath, MegaReques
 
 void MegaApiImpl::getUserAvatar(MegaUser* user, const char *dstFilePath, MegaRequestListener *listener)
 {
-    getUserAttr(user, 0, dstFilePath, listener);
+    getUserAttr(user, MegaApi::USER_ATTR_AVATAR, dstFilePath, listener);
 }
 
 void MegaApiImpl::setAvatar(const char *dstFilePath, MegaRequestListener *listener)
 {
-	setUserAttr(0, dstFilePath, listener);
+    setUserAttr(MegaApi::USER_ATTR_AVATAR, dstFilePath, listener);
 }
 
 void MegaApiImpl::getUserAttribute(MegaUser* user, int type, MegaRequestListener *listener)
@@ -2965,7 +3165,17 @@ void MegaApiImpl::getUserAttribute(MegaUser* user, int type, MegaRequestListener
 
 void MegaApiImpl::setUserAttribute(int type, const char *value, MegaRequestListener *listener)
 {
-	setUserAttr(type ? type : -1, value, listener);
+    setUserAttr(type ? type : -1, value, listener);
+}
+
+void MegaApiImpl::setCustomNodeAttribute(MegaNode *node, const char *attrName, const char *value, MegaRequestListener *listener)
+{
+    MegaRequestPrivate *request = new MegaRequestPrivate(MegaRequest::TYPE_SET_ATTR_NODE, listener);
+    if(node) request->setNodeHandle(node->getHandle());
+    request->setName(attrName);
+    request->setText(value);
+    requestQueue.push(request);
+    waiter->notify();
 }
 
 void MegaApiImpl::exportNode(MegaNode *node, int64_t expireTime, MegaRequestListener *listener)
@@ -3128,7 +3338,7 @@ void MegaApiImpl::creditCardStore(const char* address1, const char* address2, co
                  saddress2.c_str(), scity.c_str(), sprovince.c_str(), spostalcode.c_str(), scountry.c_str(), email.c_str());
 
         request->setText((const char* )ccplain);
-        delete ccplain;
+        delete [] ccplain;
     }
 
     requestQueue.push(request);
@@ -3291,7 +3501,8 @@ void MegaApiImpl::setNodeAttribute(MegaNode *node, int type, const char *srcFile
 void MegaApiImpl::getUserAttr(MegaUser *user, int type, const char *dstFilePath, MegaRequestListener *listener)
 {
 	MegaRequestPrivate *request = new MegaRequestPrivate(MegaRequest::TYPE_GET_ATTR_USER, listener);
-    if(!type && dstFilePath)
+
+    if (type == MegaApi::USER_ATTR_AVATAR && dstFilePath)
     {
         string path(dstFilePath);
 #if defined(_WIN32) && !defined(WINDOWS_PHONE)
@@ -3324,7 +3535,7 @@ void MegaApiImpl::getUserAttr(MegaUser *user, int type, const char *dstFilePath,
 void MegaApiImpl::setUserAttr(int type, const char *srcFilePath, MegaRequestListener *listener)
 {
     MegaRequestPrivate *request = new MegaRequestPrivate(MegaRequest::TYPE_SET_ATTR_USER, listener);
-    if(!type)
+    if(type == MegaApi::USER_ATTR_AVATAR)
     {
         request->setFile(srcFilePath);
     }
@@ -3431,6 +3642,15 @@ void MegaApiImpl::setDownloadMethod(int method)
             break;
         case MegaApi::TRANSFER_METHOD_AUTO:
             client->autodownport = true;
+            break;
+        case MegaApi::TRANSFER_METHOD_AUTO_NORMAL:
+            client->usealtdownport = false;
+            client->autodownport = true;
+            break;
+        case MegaApi::TRANSFER_METHOD_AUTO_ALTERNATIVE:
+            client->usealtdownport = true;
+            client->autodownport = true;
+            break;
         default:
             break;
     }
@@ -3450,6 +3670,15 @@ void MegaApiImpl::setUploadMethod(int method)
             break;
         case MegaApi::TRANSFER_METHOD_AUTO:
             client->autoupport = true;
+            break;
+        case MegaApi::TRANSFER_METHOD_AUTO_NORMAL:
+            client->usealtupport = false;
+            client->autoupport = true;
+            break;
+        case MegaApi::TRANSFER_METHOD_AUTO_ALTERNATIVE:
+            client->usealtupport = true;
+            client->autoupport = true;
+            break;
         default:
             break;
     }
@@ -3459,7 +3688,14 @@ int MegaApiImpl::getDownloadMethod()
 {
     if (client->autodownport)
     {
-        return MegaApi::TRANSFER_METHOD_AUTO;
+        if(client->usealtdownport)
+        {
+            return MegaApi::TRANSFER_METHOD_AUTO_ALTERNATIVE;
+        }
+        else
+        {
+            return MegaApi::TRANSFER_METHOD_AUTO_NORMAL;
+        }
     }
 
     if (client->usealtdownport)
@@ -3474,7 +3710,14 @@ int MegaApiImpl::getUploadMethod()
 {
     if (client->autoupport)
     {
-        return MegaApi::TRANSFER_METHOD_AUTO;
+        if(client->usealtupport)
+        {
+            return MegaApi::TRANSFER_METHOD_AUTO_ALTERNATIVE;
+        }
+        else
+        {
+            return MegaApi::TRANSFER_METHOD_AUTO_NORMAL;
+        }
     }
 
     if (client->usealtupport)
@@ -4207,6 +4450,33 @@ MegaNodeList* MegaApiImpl::getInShares()
 	return nodeList;
 }
 
+MegaShareList* MegaApiImpl::getInSharesList()
+{
+    sdkMutex.lock();
+
+    vector<Share*> vShares;
+    handle_vector vHandles;
+
+    for(user_map::iterator it = client->users.begin(); it != client->users.end(); it++)
+    {
+        User *user = &(it->second);
+        Node *n;
+
+        for (handle_set::iterator sit = user->sharing.begin(); sit != user->sharing.end(); sit++)
+        {
+            if ((n = client->nodebyhandle(*sit)) && !n->parent)
+            {
+                vShares.push_back(n->inshare);
+                vHandles.push_back(n->nodehandle);
+            }
+        }
+    }
+
+    MegaShareList *shareList = new MegaShareListPrivate(vShares.data(), vHandles.data(), vShares.size());
+    sdkMutex.unlock();
+    return shareList;
+}
+
 bool MegaApiImpl::isPendingShare(MegaNode *megaNode)
 {
     if(!megaNode) return false;
@@ -4440,14 +4710,14 @@ MegaNode *MegaApiImpl::createPublicFileNode(MegaHandle handle, const char *key, 
     string attrstring;
     nodekey.resize(strlen(key) * 3 / 4 + 3);
     nodekey.resize(Base64::atob(key, (byte *)nodekey.data(), nodekey.size()));
-    return new MegaNodePrivate(name, FILENODE, size, mtime, mtime, handle, &nodekey, &attrstring, parentHandle, auth);
+    return new MegaNodePrivate(name, FILENODE, size, mtime, mtime, handle, &nodekey, &attrstring, NULL, parentHandle, auth);
 }
 
 MegaNode *MegaApiImpl::createPublicFolderNode(MegaHandle handle, const char *name, MegaHandle parentHandle, const char *auth)
 {
     string nodekey;
     string attrstring;
-    return new MegaNodePrivate(name, FOLDERNODE, 0, 0, 0, handle, &nodekey, &attrstring, parentHandle, auth);
+    return new MegaNodePrivate(name, FOLDERNODE, 0, 0, 0, handle, &nodekey, &attrstring, NULL, parentHandle, auth);
 }
 
 void MegaApiImpl::loadBalancing(const char* service, MegaRequestListener *listener)
@@ -4604,29 +4874,7 @@ char *MegaApiImpl::getFingerprint(MegaNode *n)
 {
     if(!n) return NULL;
 
-    sdkMutex.lock();
-    Node *node = client->nodebyhandle(n->getHandle());
-    if(!node || node->type != FILENODE || node->size < 0 || !node->isvalid)
-    {
-        sdkMutex.unlock();
-        return NULL;
-    }
-
-    string fingerprint;
-    node->serializefingerprint(&fingerprint);
-    m_off_t size = node->size;
-    sdkMutex.unlock();
-
-    char bsize[sizeof(size)+1];
-    int l = Serialize64::serialize((byte *)bsize, size);
-    char *buf = new char[l * 4 / 3 + 4];
-    char ssize = 'A' + Base64::btoa((const byte *)bsize, l, buf);
-    string result(1, ssize);
-    result.append(buf);
-    result.append(fingerprint);
-    delete [] buf;
-
-    return MegaApi::strdup(result.c_str());
+    return MegaApi::strdup(n->getFingerprint());
 }
 
 char *MegaApiImpl::getFingerprint(MegaInputStream *inputStream, int64_t mtime)
@@ -5036,6 +5284,7 @@ void MegaApiImpl::transfer_failed(Transfer* tr, error e)
 
 void MegaApiImpl::transfer_limit(Transfer* t)
 {
+    LOG_warn << "Transfer limit";
     if(transferMap.find(t->tag) == transferMap.end()) return;
     MegaTransferPrivate* transfer = transferMap.at(t->tag);
     transfer->setUpdateTime(Waiter::ds);
@@ -5340,7 +5589,7 @@ void MegaApiImpl::syncupdate_put(Sync *sync, LocalNode *localNode, const char *p
 
 void MegaApiImpl::syncupdate_remote_file_addition(Sync *sync, Node *n)
 {
-    LOG_debug << "Sync - remote file addition detected " << n->displayname();
+    LOG_debug << "Sync - remote file addition detected " << n->displayname() << " Nhandle: " << LOG_NODEHANDLE(n->nodehandle);
     client->abortbackoff(false);
 
     if(syncMap.find(sync->tag) == syncMap.end()) return;
@@ -5536,7 +5785,11 @@ void MegaApiImpl::setattr_result(handle h, error e)
 	MegaError megaError(e);
     if(requestMap.find(client->restag) == requestMap.end()) return;
     MegaRequestPrivate* request = requestMap.at(client->restag);
-    if(!request || (request->getType() != MegaRequest::TYPE_RENAME)) return;
+    if (!request || ((request->getType() != MegaRequest::TYPE_RENAME)
+            && request->getType() != MegaRequest::TYPE_SET_ATTR_NODE))
+    {
+        return;
+    }
 
 	request->setNodeHandle(h);
     fireOnRequestFinish(request, megaError);
@@ -6018,6 +6271,12 @@ void MegaApiImpl::notify_retry(dstime dsdelta)
     if(previousFlag != waitingRequest)
         fireOnGlobalSyncStateChanged();
 #endif
+
+    if (dsdelta && requestMap.size() == 1)
+    {
+        MegaRequestPrivate *request = requestMap.begin()->second;
+        fireOnRequestTemporaryError(request, MegaError(API_EAGAIN));
+    }
 }
 
 // callback for non-EAGAIN request-level errors
@@ -6269,6 +6528,7 @@ void MegaApiImpl::openfilelink_result(handle ph, const byte* key, m_off_t size, 
     string attrstring;
     string fileName;
     string keystring;
+    string fingerprint;
 
     attrstring.resize(a->length()*4/3+4);
     attrstring.resize(Base64::btoa((const byte *)a->data(),a->length(), (char *)attrstring.data()));
@@ -6306,6 +6566,18 @@ void MegaApiImpl::openfilelink_result(handle ph, const byte* key, m_off_t size, 
             if(ffp.unserializefingerprint(&it->second))
             {
                 mtime = ffp.mtime;
+
+                char bsize[sizeof(size)+1];
+                int l = Serialize64::serialize((byte *)bsize, size);
+                char *buf = new char[l * 4 / 3 + 4];
+                char ssize = 'A' + Base64::btoa((const byte *)bsize, l, buf);
+
+                string result(1, ssize);
+                result.append(buf);
+                result.append(it->second);
+                delete [] buf;
+
+                fingerprint = result;
             }
         }
     }
@@ -6332,7 +6604,8 @@ void MegaApiImpl::openfilelink_result(handle ph, const byte* key, m_off_t size, 
 	}
 	else
 	{
-        request->setPublicNode(new MegaNodePrivate(fileName.c_str(), FILENODE, size, 0, mtime, ph, &keystring, a));
+        request->setPublicNode(new MegaNodePrivate(fileName.c_str(), FILENODE, size, 0, mtime, ph, &keystring, a,
+                                                   fingerprint.size() ? fingerprint.c_str() : NULL));
         fireOnRequestFinish(request, MegaError(MegaError::API_OK));
 	}
 }
@@ -6431,31 +6704,39 @@ void MegaApiImpl::getua_result(byte* data, unsigned len)
 	MegaRequestPrivate* request = requestMap.at(client->restag);
     if(!request || (request->getType() != MegaRequest::TYPE_GET_ATTR_USER)) return;
 
-    if(request->getParamType() == 0)
+    if(request->getParamType() == MegaApi::USER_ATTR_AVATAR)
     {
-        FileAccess *f = client->fsaccess->newfileaccess();
-        string filePath(request->getFile());
-        string localPath;
-        fsAccess->path2local(&filePath, &localPath);
-
-        totalDownloadedBytes += len;
-
-        fsAccess->unlinklocal(&localPath);
-        if(!f->fopen(&localPath, false, true))
+        if (len)
         {
+            FileAccess *f = client->fsaccess->newfileaccess();
+            string filePath(request->getFile());
+            string localPath;
+            fsAccess->path2local(&filePath, &localPath);
+
+            totalDownloadedBytes += len;
+
+            fsAccess->unlinklocal(&localPath);
+            if(!f->fopen(&localPath, false, true))
+            {
+                delete f;
+                fireOnRequestFinish(request, MegaError(API_EWRITE));
+                return;
+            }
+
+            if(!f->fwrite((const byte*)data, len, 0))
+            {
+                delete f;
+                fireOnRequestFinish(request, MegaError(API_EWRITE));
+                return;
+            }
+
             delete f;
-            fireOnRequestFinish(request, MegaError(API_EWRITE));
+        }
+        else    // no data for the avatar
+        {
+            fireOnRequestFinish(request, MegaError(API_ENOENT));
             return;
         }
-
-        if(!f->fwrite((const byte*)data, len, 0))
-        {
-            delete f;
-            fireOnRequestFinish(request, MegaError(API_EWRITE));
-            return;
-        }
-
-        delete f;
     }
     else
     {
@@ -6468,7 +6749,6 @@ void MegaApiImpl::getua_result(byte* data, unsigned len)
 // user attribute update notification
 void MegaApiImpl::userattr_update(User*, int, const char*)
 {
-
 }
 
 void MegaApiImpl::ephemeral_result(error e)
@@ -7146,7 +7426,15 @@ MegaError MegaApiImpl::checkMove(MegaNode* megaNode, MegaNode* targetNode)
 	MegaError e(client->checkmove(node,target));
     sdkMutex.unlock();
 
-	return e;
+    return e;
+}
+
+bool MegaApiImpl::isFilesystemAvailable()
+{
+    sdkMutex.lock();
+    bool result = client->nodebyhandle(client->rootnodes[0]) != NULL;
+    sdkMutex.unlock();
+    return result;
 }
 
 bool MegaApiImpl::nodeComparatorDefaultASC (Node *i, Node *j)
@@ -8207,22 +8495,56 @@ void MegaApiImpl::sendPendingRequests()
             MegaNode *publicNode = request->getPublicNode();
             const char *newName = request->getName();
 
-            if((!node && !publicNode) || (!target && !email) || (newName && !(*newName))) { e = API_EARGS; break; }
+            if (!publicNode || (!target && !email) || (newName && !(*newName))) { e = API_EARGS; break; }
 
-            if(publicNode)
+            if (!node)
             {
-                if(publicNode->getAuth()->size())
-                {
-                    e = API_EACCESS;
-                    break;
-                }
-
                 NewNode *newnode = new NewNode[1];
                 newnode->nodekey.assign(publicNode->getNodeKey()->data(), publicNode->getNodeKey()->size());
                 newnode->attrstring = new string;
-                newnode->attrstring->assign(publicNode->getAttrString()->data(), publicNode->getAttrString()->size());
+
+                if (publicNode->isPublic())
+                {
+                    newnode->attrstring->assign(publicNode->getAttrString()->data(), publicNode->getAttrString()->size());
+                    newnode->source = NEW_PUBLIC;
+                }
+                else
+                {
+                    SymmCipher key;
+                    AttrMap attrs;
+
+                    key.setkey((const byte*)publicNode->getNodeKey()->data(), FILENODE);
+                    string sname = publicNode->getName();
+                    fsAccess->normalize(&sname);
+                    attrs.map['n'] = sname;
+
+                    const char *fingerprint = publicNode->getFingerprint();
+                    if (fingerprint && fingerprint[0])
+                    {
+                        m_off_t size = 0;
+                        unsigned int fsize = strlen(fingerprint);
+                        unsigned int ssize = fingerprint[0] - 'A';
+                        if (!(ssize > (sizeof(size) * 4 / 3 + 4) || fsize <= (ssize + 1)))
+                        {
+                            int len =  sizeof(size) + 1;
+                            byte *buf = new byte[len];
+                            Base64::atob(fingerprint + 1, buf, len);
+                            int l = Serialize64::unserialize(buf, len, (uint64_t *)&size);
+                            delete [] buf;
+                            if (l > 0)
+                            {
+                                attrs.map['c'] = fingerprint + ssize + 1;
+                            }
+                        }
+                    }
+
+                    string attrstring;
+                    attrs.getjson(&attrstring);
+                    client->makeattr(&key,newnode->attrstring, attrstring.c_str());
+                    newnode->source = NEW_NODE;
+                }
+
                 newnode->nodehandle = publicNode->getHandle();
-                newnode->source = NEW_PUBLIC;
                 newnode->type = FILENODE;
                 newnode->parenthandle = UNDEF;
 
@@ -8479,41 +8801,63 @@ void MegaApiImpl::sendPendingRequests()
                 user = client->finduser(client->me, 0);
             }
 
-            if((!type && !value) || !user || (type < 0)) { e = API_EARGS; break; }
-
-            if(!type)
+            if(!user)
             {
-                client->getua(user, "a", 0);
+                e = API_EARGS;
+                break;
             }
-            else
+
+            string attrname;
+            switch(type)
             {
-                string attrname;
-                switch(type)
+                case MegaApi::USER_ATTR_AVATAR:
                 {
-                    case MegaApi::USER_ATTR_FIRSTNAME:
-                    {
-                        attrname = "firstname";
-                        break;
-                    }
-
-                    case MegaApi::USER_ATTR_LASTNAME:
-                    {
-                        attrname = "lastname";
-                        break;
-                    }
-
-                    default:
+                    if (!value)    // destination file
                     {
                         e = API_EARGS;
                         break;
                     }
+
+                    attrname = "+a";
+                    break;
                 }
 
-                if(!e)
+                case MegaApi::USER_ATTR_FIRSTNAME:
                 {
-                    client->getua(user, attrname.c_str(), 2);
+                    attrname = "firstname";
+                    break;
+                }
+
+                case MegaApi::USER_ATTR_LASTNAME:
+                {
+                    attrname = "lastname";
+                    break;
+                }
+
+                case MegaApi::USER_ATTR_AUTHRING:
+                {
+                    attrname = "*!authring";
+                    break;
+                }
+
+                case MegaApi::USER_ATTR_LAST_INTERACTION:
+                {
+                    attrname = "*!lstint";
+                    break;
+                }
+
+                default:
+                {
+                    e = API_EARGS;
+                    break;
                 }
             }
+
+            if(!e)
+            {
+                client->getua(user, attrname.c_str());
+            }
+
             break;
 		}
 		case MegaRequest::TYPE_SET_ATTR_USER:
@@ -8522,66 +8866,93 @@ void MegaApiImpl::sendPendingRequests()
             const char* value = request->getText();
             int type = request->getParamType();
 
-            if ((!type && !file) || (type < 0) || (type && !value))
+            if (!value && type != MegaApi::USER_ATTR_AVATAR)
             {
                 e = API_EARGS;
                 break;
             }
 
-            if(!type)
-            {
-                string path = file;
-                string localpath;
-                fsAccess->path2local(&path, &localpath);
+            string attrname;
+            string attrvalue;
 
-                string attributedata;
-                FileAccess *f = fsAccess->newfileaccess();
-                if (!f->fopen(&localpath, 1, 0))
+            switch (type)
+            {
+                case MegaApi::USER_ATTR_AVATAR:
                 {
-                    delete f;
-                    e = API_EREAD;
+                    attrname = "+a";
+
+                    if (file)
+                    {
+                        string path = file;
+                        string localpath;
+                        fsAccess->path2local(&path, &localpath);
+
+                        FileAccess *f = fsAccess->newfileaccess();
+                        if (!f->fopen(&localpath, 1, 0))
+                        {
+                            delete f;
+                            e = API_EREAD;
+                            break;
+                        }
+
+                        if (!f->fread(&attrvalue, f->size, 0, 0))
+                        {
+                            delete f;
+                            e = API_EREAD;
+                            break;
+                        }
+                        delete f;
+                    }
                     break;
                 }
 
-                if (!f->fread(&attributedata, f->size, 0, 0))
+                case MegaApi::USER_ATTR_FIRSTNAME:
                 {
-                    delete f;
-                    e = API_EREAD;
+                    attrname = "firstname";
+                    attrvalue = value;
                     break;
                 }
-                delete f;
 
-                client->putua("a", (byte *)attributedata.data(), attributedata.size(), 0);
+                case MegaApi::USER_ATTR_LASTNAME:
+                {
+                    attrname = "lastname";
+                    attrvalue = value;
+                    break;
+                }
+
+                case MegaApi::USER_ATTR_AUTHRING:
+                {
+                    attrname = "*!authring";
+                    attrvalue = value;
+                    break;
+                }
+
+                case MegaApi::USER_ATTR_LAST_INTERACTION:
+                {
+                    attrname = "*!lstint";
+                    attrvalue = value;
+                    break;
+                }
+
+                default:
+                {
+                    e = API_EARGS;
+                    break;
+                }
             }
-            else
+
+            if (!e)
             {
-                string attrname;
-                string attrvalue = value;
-                switch(type)
+                if ((type == MegaApi::USER_ATTR_AVATAR) && (attrvalue.empty()))
                 {
-                    case MegaApi::USER_ATTR_FIRSTNAME:
-                    {
-                        attrname = "firstname";
-                        break;
-                    }
-
-                    case MegaApi::USER_ATTR_LASTNAME:
-                    {
-                        attrname = "lastname";
-                        break;
-                    }
-
-                    default:
-                    {
-                        e = API_EARGS;
-                        break;
-                    }
+                    client->putua(attrname.c_str());
                 }
-                if(!e)
+                else
                 {
-                    client->putua(attrname.c_str(), (byte *)attrvalue.data(), attrvalue.size(), 2);
+                    client->putua(attrname.c_str(), (byte *)attrvalue.data(), attrvalue.size());
                 }
             }
+
             break;
 		}
         case MegaRequest::TYPE_SET_ATTR_FILE:
@@ -8617,6 +8988,43 @@ void MegaApiImpl::sendPendingRequests()
 
             client->putfa(node->nodehandle, type, node->nodecipher(), attributedata);
             //attributedata is not deleted because putfa takes its ownership
+            break;
+        }
+        case MegaRequest::TYPE_SET_ATTR_NODE:
+        {
+            Node *node = client->nodebyhandle(request->getNodeHandle());
+            const char* attrName = request->getName();
+            const char* attrValue = request->getText();
+
+            if (!node || !attrName || !attrName[0] || strlen(attrName) > 7)
+            {
+                e = API_EARGS;
+                break;
+            }
+
+            if (!client->checkaccess(node, FULL))
+            {
+                e = API_EACCESS;
+                break;
+            }
+
+            string sname = attrName;
+            fsAccess->normalize(&sname);
+            sname.insert(0, "_");
+            nameid attr = AttrMap::string2nameid(sname.c_str());
+
+            if (attrValue)
+            {
+                string svalue = attrValue;
+                fsAccess->normalize(&svalue);
+                node->attrs.map[attr] = svalue;
+            }
+            else
+            {
+                node->attrs.map.erase(attr);
+            }
+
+            e = client->setattr(node);
             break;
         }
 		case MegaRequest::TYPE_CANCEL_ATTR_FILE:
@@ -8661,26 +9069,7 @@ void MegaApiImpl::sendPendingRequests()
                 while (true)
                 {
                 #ifdef WINDOWS_PHONE
-                    struct hostent *hp;
-                    hp = gethostbyname("ns.mega.co.nz");
-                    if (hp != NULL && hp->h_addr != NULL)
-                    {
-                        struct in_addr **addr_list;
-                        addr_list = (struct in_addr **)hp->h_addr_list;
-                        for (int i = 0; addr_list[i] != NULL; i++)
-                        {
-                            char str[INET_ADDRSTRLEN];
-                            const char *ip = inet_ntop(AF_INET, addr_list[i], str, INET_ADDRSTRLEN);
-                            if(ip == str)
-                            {
-                                if (servers.size())
-                                {
-                                    servers.append(",");
-                                }
-                                servers.append(ip);
-                            }
-                        }
-                    }
+                    client->httpio->getMEGADNSservers(&servers);
                 #else
                     __res_state res;
                     if(res_ninit(&res) == 0)
@@ -8695,12 +9084,12 @@ void MegaApiImpl::sendPendingRequests()
 
                             if(u[i].sin.sin_family == PF_INET)
                             {
-                                inet_ntop(PF_INET, &u[i].sin.sin_addr, straddr, sizeof(straddr));
+                                mega_inet_ntop(PF_INET, &u[i].sin.sin_addr, straddr, sizeof(straddr));
                             }
 
                             if(u[i].sin6.sin6_family == PF_INET6)
                             {
-                                inet_ntop(PF_INET6, &u[i].sin6.sin6_addr, straddr, sizeof(straddr));
+                                mega_inet_ntop(PF_INET6, &u[i].sin6.sin6_addr, straddr, sizeof(straddr));
                             }
 
                             if(straddr[0])
@@ -8737,8 +9126,20 @@ void MegaApiImpl::sendPendingRequests()
 		}
 		case MegaRequest::TYPE_ADD_CONTACT:
 		{
-			const char *email = request->getEmail();
-			if(!email) { e = API_EARGS; break; }
+            const char *email = request->getEmail();
+
+            if(client->loggedin() != FULLACCOUNT)
+            {
+                e = API_EACCESS;
+                break;
+            }
+
+            if(!email || !client->finduser(client->me)->email.compare(email))
+            {
+                e = API_EARGS;
+                break;
+            }
+
 			e = client->invite(email, VISIBLE);
 			break;
 		}
@@ -8747,7 +9148,14 @@ void MegaApiImpl::sendPendingRequests()
             const char *email = request->getEmail();
             const char *message = request->getText();
             int action = request->getNumber();
-            if(!email)
+
+            if(client->loggedin() != FULLACCOUNT)
+            {
+                e = API_EACCESS;
+                break;
+            }
+
+            if(!email || !client->finduser(client->me)->email.compare(email))
             {
                 e = API_EARGS;
                 break;
@@ -9018,7 +9426,7 @@ void MegaApiImpl::sendPendingRequests()
             char *base64details = new char[size * 4 / 3 + 4];
             Base64::btoa((byte *)details, size, base64details);
             client->reportevent(event.c_str(), base64details);
-            delete base64details;
+            delete [] base64details;
             break;
         }
         case MegaRequest::TYPE_DELETE:
@@ -10014,7 +10422,7 @@ MegaSyncEventPrivate::MegaSyncEventPrivate(int type)
 
 MegaSyncEventPrivate::~MegaSyncEventPrivate()
 {
-    delete path;
+    delete [] path;
 }
 
 MegaSyncEvent *MegaSyncEventPrivate::copy()

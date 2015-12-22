@@ -1136,6 +1136,14 @@ CommandLogin::CommandLogin(MegaClient* client, const char* email, uint64_t email
         arg("user", email);
         arg("uh", (byte*)&emailhash, sizeof emailhash);
     }
+    else
+    {
+        if (client->sctable && client->dbaccess->currentDbVersion == DbAccess::LEGACY_DB_VERSION)
+        {
+            LOG_debug << "Requesting a local cache upgrade";
+            arg("fa", 1);
+        }
+    }
 
     if (sessionkey)
     {
@@ -1164,6 +1172,7 @@ void CommandLogin::procresult()
     byte sek[SymmCipher::KEYLENGTH];
     int len_k = 0, len_privk = 0, len_csid = 0, len_tsid = 0, len_sek = 0;
     handle me = UNDEF;
+    bool fa = false;
 
     for (;;)
     {
@@ -1193,6 +1202,10 @@ void CommandLogin::procresult()
                 len_privk = client->json.storebinary(privkbuf, sizeof privkbuf);
                 break;
 
+            case MAKENAMEID2('f', 'a'):
+                fa = client->json.getint();
+                break;
+
             case MAKENAMEID2('s', 'n'):
                 if (!client->json.getint())
                 {
@@ -1213,6 +1226,22 @@ void CommandLogin::procresult()
                     // decrypt and set master key
                     client->key.ecb_decrypt(hash);
                     client->key.setkey(hash);
+                }
+                else
+                {
+                    if (fa && client->sctable)
+                    {
+                        client->sctable->remove();
+                        delete client->sctable;
+                        client->sctable = NULL;
+                        client->cachedscsn = UNDEF;
+                        client->dbaccess->currentDbVersion = DbAccess::DB_VERSION;
+
+                        int creqtag = client->reqtag;
+                        client->reqtag = 0;
+                        client->sendevent(99404, "Local DB upgrade granted");
+                        client->reqtag = creqtag;
+                    }
                 }
 
                 if (len_sek)
@@ -1886,7 +1915,16 @@ void CommandUserRequest::procresult()
 CommandPutUA::CommandPutUA(MegaClient* client, const char *an, const byte* av, unsigned avl)
 {
     cmd("up");
-    arg(an, av, avl);
+
+    // if removing avatar, do not Base64 encode the attribute value
+    if (!strcmp(an, "+a") && !strcmp((const char *)av, "none"))
+    {
+        arg(an,(const char *)av, avl);
+    }
+    else
+    {
+        arg(an, av, avl);
+    }
 
     tag = client->reqtag;
 }
@@ -1908,9 +1946,8 @@ void CommandPutUA::procresult()
     client->app->putua_result(e);
 }
 
-CommandGetUA::CommandGetUA(MegaClient* client, const char* uid, const char* an, int p)
+CommandGetUA::CommandGetUA(MegaClient* client, const char* uid, const char* an)
 {
-    priv = p;
     user = client->finduser((char*)uid);
     attributename = an;
 
@@ -1963,7 +2000,6 @@ void CommandGetUA::procresult()
     }
     else
     {
-        string d;
         const char* ptr;
         const char* end;
 
@@ -1972,14 +2008,38 @@ void CommandGetUA::procresult()
             return(client->app->getua_result(API_EINTERNAL));
         }
 
-        int l = (end - ptr) / 4 * 3 + 3;
+        // if there's no avatar, the value is "none" (not Base64 encoded)
+        if (attributename == "+a" && !strncmp(ptr, "none", 4))
+        {
+            return(client->app->getua_result(API_ENOENT));
+        }
 
-        byte* data = new byte[l];
-
+        int l;
+        byte* data;
+        l = (end - ptr) / 4 * 3 + 3;
+        data = new byte[l];
         l = Base64::atob(ptr, data, l);
 
-        if (priv == 1)
+        if (attributename == "firstname")
         {
+            if (!user->firstname)
+            {
+                user->firstname = new string;
+            }
+            user->firstname->assign((char*) data, l);
+        }
+        else if (attributename == "lastname")
+        {
+            if (!user->lastname)
+            {
+                user->lastname = new string;
+            }
+            user->lastname->assign((char*) data, l);
+        }
+
+        if (attributename == "*!lstint" || attributename == "*!authring")
+        {
+            string d;
             d.assign((char*)data, l);
 
             // Is the data a multiple of the cipher blocksize, then we're using
@@ -2010,13 +2070,9 @@ void CommandGetUA::procresult()
             }
             client->app->getua_result((byte*)d.data(), d.size());
         }
-        else if (!priv || priv == 2)
-        {
-            client->app->getua_result(data, l);
-        }
         else
         {
-            client->app->getua_result(API_EARGS);
+            client->app->getua_result(data, l);
         }
 
         delete[] data;

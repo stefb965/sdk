@@ -168,6 +168,12 @@ void HttpIO::getMEGADNSservers(string *dnsservers, bool getfromnetwork)
 
 void HttpReq::post(MegaClient* client, const char* data, unsigned len)
 {
+    if (httpio)
+    {
+        LOG_warn << "Ensuring that the request is finished before sending it again";
+        httpio->cancel(this);
+    }
+
     httpio = client->httpio;
     bufpos = 0;
     inpurge = 0;
@@ -186,7 +192,10 @@ void HttpReq::postchunked(MegaClient* client)
     }
     else
     {
-        httpio->sendchunked(this);
+        if (httpio)
+        {
+            httpio->sendchunked(this);
+        }
     }
 }
 
@@ -195,6 +204,7 @@ void HttpReq::disconnect()
     if (httpio)
     {
         httpio->cancel(this);
+        httpio = NULL;
     }
 
     chunked = false;
@@ -344,7 +354,7 @@ m_off_t HttpReq::transferred(MegaClient*)
 }
 
 // prepare file chunk download
-bool HttpReqDL::prepare(FileAccess* fa, const char* tempurl, SymmCipher* key,
+void HttpReqDL::prepare(const char* tempurl, SymmCipher* key,
                         chunkmac_map* macs, uint64_t ctriv, m_off_t pos,
                         m_off_t npos)
 {
@@ -367,63 +377,24 @@ bool HttpReqDL::prepare(FileAccess* fa, const char* tempurl, SymmCipher* key,
         buf = new byte[(size + SymmCipher::BLOCKSIZE - 1) & - SymmCipher::BLOCKSIZE];
         buflen = size;
     }
-
-    return true;
 }
 
 // decrypt, mac and write downloaded chunk
-void HttpReqDL::finalize(FileAccess* fa, SymmCipher* key, chunkmac_map* macs,
-                         uint64_t ctriv, m_off_t startpos, m_off_t endpos)
+void HttpReqDL::finalize(SymmCipher* key, chunkmac_map* macs, uint64_t ctriv)
 {
     byte mac[SymmCipher::BLOCKSIZE] = { 0 };
 
     key->ctr_crypt(buf, bufpos, dlpos, ctriv, mac, 0);
 
-    unsigned skip;
-    unsigned prune;
-
-    if (endpos == -1)
-    {
-        skip = 0;
-        prune = 0;
-    }
-    else
-    {
-        if (startpos > dlpos)
-        {
-            skip = (unsigned)(startpos - dlpos);
-        }
-        else
-        {
-            skip = 0;
-        }
-
-        if (dlpos + bufpos > endpos)
-        {
-            prune = (unsigned)(dlpos + bufpos - endpos);
-        }
-        else
-        {
-            prune = 0;
-        }
-    }
-
-    fa->fwrite(buf + skip, bufpos - skip - prune, dlpos + skip);
-
     memcpy((*macs)[dlpos].mac, mac, sizeof mac);
 }
 
 // prepare chunk for uploading: mac and encrypt
-bool HttpReqUL::prepare(FileAccess* fa, const char* tempurl, SymmCipher* key,
+void HttpReqUL::prepare(const char* tempurl, SymmCipher* key,
                         chunkmac_map* macs, uint64_t ctriv, m_off_t pos,
                         m_off_t npos)
 {
     size = (unsigned)(npos - pos);
-
-    if (!fa->fread(out, size, (-(int)size) & (SymmCipher::BLOCKSIZE - 1), pos))
-    {
-        return false;
-    }
 
     byte mac[SymmCipher::BLOCKSIZE] = { 0 };
     char buf[256];
@@ -437,8 +408,6 @@ bool HttpReqUL::prepare(FileAccess* fa, const char* tempurl, SymmCipher* key,
 
     // unpad for POSTing
     out->resize(size);
-
-    return true;
 }
 
 // number of bytes sent in this request

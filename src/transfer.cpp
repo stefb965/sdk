@@ -40,6 +40,7 @@ Transfer::Transfer(MegaClient* cclient, direction_t ctype)
     metamac = 0;
     tag = 0;
     slot = NULL;
+    asyncopencontext = NULL;
     
     faputcompletion_it = client->faputcompletion.end();
 }
@@ -67,6 +68,8 @@ Transfer::~Transfer()
     {
         delete slot;
     }
+
+    delete asyncopencontext;
 }
 
 // transfer attempt failed, notify all related files, collect request on
@@ -109,10 +112,10 @@ void Transfer::failed(error e)
 // fingerprint, notify app, notify files
 void Transfer::complete()
 {
-    LOG_debug << "Transfer complete: " << (files.size() ? files.front()->name : "NO_FILES") << " " << files.size();
-
     if (type == GET)
     {
+        LOG_debug << "Download complete: " << (files.size() ? LOG_NODEHANDLE(files.front()->h) : "NO_FILES") << " " << files.size();
+
         bool transient_error = false;
         string tmplocalname;
         string localname;
@@ -142,6 +145,9 @@ void Transfer::complete()
         Node* n;
         bool fixfingerprint = false;
 
+#ifdef EMSCRIPTEN
+# warning FIXME -- verify integrity of file
+#else
         if (!transient_error && fa->fopen(&localfilename, true, false))
         {
             fingerprint.genfingerprint(fa);
@@ -170,6 +176,7 @@ void Transfer::complete()
                 LOG_debug << "Unable to validate fingerprint " << transient_error;
             }
         }
+#endif
 #endif
         delete fa;
 
@@ -230,6 +237,7 @@ void Transfer::complete()
                 success = false;
                 localname = (*it)->localname;
 
+#ifndef EMSCRIPTEN
                 fa = client->fsaccess->newfileaccess();
                 if (fa->fopen(&localname))
                 {
@@ -332,6 +340,7 @@ void Transfer::complete()
                     it++;
                     continue;
                 }
+#endif
 
                 if (!tmplocalname.size())
                 {
@@ -425,11 +434,21 @@ void Transfer::complete()
     }
     else
     {
+        LOG_debug << "Upload complete: " << (files.size() ? files.front()->name : "NO_FILES") << " " << files.size();
+
+#ifndef EMSCRIPTEN
         // files must not change during a PUT transfer
+        if (slot->fa->asyncavailable())
+        {
+            slot->fa->closef();
+            slot->fa->fopen(&localfilename);
+        }
+
         if (genfingerprint(slot->fa, true))
         {
             return failed(API_EREAD);
         }
+#endif
 
         // if this transfer is put on hold, do not complete
         client->checkfacompletion(uploadhandle, this);
@@ -506,7 +525,7 @@ void DirectReadNode::dispatch()
             assert(!(*it)->drs);
         }
 
-        pendingcmd = new CommandDirectRead(this);
+        pendingcmd = new CommandDirectRead(client, this);
 
         client->reqs.add(pendingcmd);
     }

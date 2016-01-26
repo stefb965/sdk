@@ -38,6 +38,10 @@
 #include <cctype>
 #include <locale>
 
+#ifdef EMSCRIPTEN
+#include <emscripten.h>
+#endif
+
 #ifndef _WIN32
 #ifndef _LARGEFILE64_SOURCE
     #define _LARGEFILE64_SOURCE
@@ -64,7 +68,7 @@
 
 #endif
 
-#if (!defined(_WIN32) && !defined(USE_CURL_PUBLIC_KEY_PINNING)) || defined(WINDOWS_PHONE)
+#if (!defined(_WIN32) && !defined(USE_CURL_PUBLIC_KEY_PINNING) && !defined(EMSCRIPTEN)) || defined(WINDOWS_PHONE)
 #include <openssl/rand.h>
 #endif
 
@@ -250,9 +254,7 @@ MegaNode *MegaNodePrivate::copy()
 
 char *MegaNodePrivate::getBase64Handle()
 {
-    char *base64Handle = new char[12];
-    Base64::btoa((byte*)&(nodehandle),MegaClient::NODEHANDLE,base64Handle);
-    return base64Handle;
+    return MegaApiImpl::handleToBase64(nodehandle);
 }
 
 int MegaNodePrivate::getType()
@@ -362,8 +364,8 @@ char *MegaNodePrivate::getBase64Key()
     // the key
     if (type == FILENODE && nodekey.size() >= FILENODEKEYLENGTH)
     {
-        key = new char[FILENODEKEYLENGTH*4/3+3];
-        Base64::btoa((const byte*)nodekey.data(),FILENODEKEYLENGTH, key);
+        key = new char[FILENODEKEYLENGTH * 4 / 3 + 3];
+        Base64::btoa((const byte*)nodekey.data(), FILENODEKEYLENGTH, key);
     }
 
     return key;
@@ -785,7 +787,17 @@ MegaSharePrivate::~MegaSharePrivate()
 
 const char *MegaSharePrivate::getUser()
 {
-	return user;
+    return user;
+}
+
+char *MegaSharePrivate::getBase64Handle()
+{
+    if (nodehandle == UNDEF)
+    {
+        return NULL;
+    }
+
+    return MegaApiImpl::handleToBase64(nodehandle);
 }
 
 uint64_t MegaSharePrivate::getNodeHandle()
@@ -955,7 +967,29 @@ const char* MegaTransferPrivate::getPath() const
 
 const char* MegaTransferPrivate::getParentPath() const
 {
-	return parentPath;
+    return parentPath;
+}
+
+char *MegaTransferPrivate::getBase64NodeHandle() const
+{
+    if (nodeHandle == UNDEF)
+    {
+        return NULL;
+    }
+
+    return MegaApiImpl::handleToBase64(nodeHandle);
+}
+
+char *MegaTransferPrivate::getParentBase64Handle() const
+{
+    if (parentHandle == UNDEF)
+    {
+        return NULL;
+    }
+
+    char *base64Handle = new char[12];
+    Base64::btoa((byte*)&(parentHandle), MegaClient::NODEHANDLE, base64Handle);
+    return base64Handle;
 }
 
 uint64_t MegaTransferPrivate::getNodeHandle() const
@@ -1263,6 +1297,16 @@ MegaHandle MegaContactRequestPrivate::getHandle() const
     return handle;
 }
 
+char *MegaContactRequestPrivate::getBase64Handle() const
+{
+    if (handle == UNDEF)
+    {
+        return NULL;
+    }
+
+    return MegaApiImpl::handleToBase64(handle, MegaClient::PCRHANDLE);
+}
+
 char *MegaContactRequestPrivate::getSourceEmail() const
 {
     return sourceEmail;
@@ -1472,7 +1516,19 @@ uint64_t MegaRequestPrivate::getNodeHandle() const
 
 const char* MegaRequestPrivate::getLink() const
 {
-	return link;
+    return link;
+}
+
+char *MegaRequestPrivate::getParentBase64Handle() const
+{
+    if (parentHandle == UNDEF)
+    {
+        return NULL;
+    }
+
+    char *base64Handle = new char[12];
+    Base64::btoa((byte*)&(parentHandle), MegaClient::NODEHANDLE, base64Handle);
+    return base64Handle;
 }
 
 uint64_t MegaRequestPrivate::getParentHandle() const
@@ -1813,7 +1869,17 @@ const char *MegaRequestPrivate::__str__() const
 
 const char *MegaRequestPrivate::__toString() const
 {
-	return getRequestString();
+    return getRequestString();
+}
+
+char *MegaRequestPrivate::getBase64NodeHandle() const
+{
+    if (nodeHandle == UNDEF)
+    {
+        return NULL;
+    }
+    
+    return MegaApiImpl::handleToBase64(nodeHandle);
 }
 
 MegaStringListPrivate::MegaStringListPrivate()
@@ -2216,6 +2282,7 @@ void MegaFileGet::prepare()
     {
         transfer->localfilename = localname;
 
+#ifndef EMSCRIPTEN
         size_t index =  string::npos;
         while ((index = transfer->localfilename.rfind(transfer->client->fsaccess->localseparator, index)) != string::npos)
         {
@@ -2235,6 +2302,7 @@ void MegaFileGet::prepare()
         string suffix;
         transfer->client->fsaccess->tmpnamelocal(&suffix);
         transfer->localfilename.append(suffix);
+#endif
     }
 }
 
@@ -2383,6 +2451,7 @@ void MegaApiImpl::init(MegaApi *api, const char *appKey, MegaGfxProcessor* proce
     fsAccess = new MegaFileSystemAccess(fseventsfd);
 #endif
 
+#ifndef EMSCRIPTEN
 	if (basePath)
 	{
 		string sBasePath = basePath;
@@ -2395,8 +2464,12 @@ void MegaApiImpl::init(MegaApi *api, const char *appKey, MegaGfxProcessor* proce
 		}
 		dbAccess = new MegaDbAccess(&sBasePath);
 	}
-	else dbAccess = NULL;
-
+	else
+#endif
+    {
+        dbAccess = NULL;
+    }
+    
 	gfxAccess = NULL;
 	if(processor)
 	{
@@ -2420,10 +2493,44 @@ void MegaApiImpl::init(MegaApi *api, const char *appKey, MegaGfxProcessor* proce
     httpio->unlock();
 #endif
 
+#ifndef EMSCRIPTEN
     //Start blocking thread
 	threadExit = 0;
     thread.start(threadEntryPoint, this);
+#else
+    notified = false;
+    nextExec = 0;
+    waiter->setNotifyCallback(MegaApiImpl::notifyCallback, this);
+#endif
 }
+
+#ifdef EMSCRIPTEN
+void MegaApiImpl::notifyCallback(void *param)
+{
+    MegaApiImpl *p = (MegaApiImpl *)param;
+    if (!p->notified)
+    {
+        p->notified = true;
+        emscripten_async_call(MegaApiImpl::emscriptenLoop, param, 0);
+    }
+}
+
+void MegaApiImpl::emscriptenLoop(void *param)
+{	
+    MegaApiImpl *p = (MegaApiImpl *)param;
+    p->notified = false;
+    p->sendPendingTransfers();
+    p->sendPendingRequests();
+    p->client->exec();
+    p->client->wait();
+    
+    if (p->waiter->maxds != NEVER && (p->nextExec <= p->waiter->ds || (p->waiter->ds + p->waiter->maxds) < p->nextExec))
+    {
+        p->nextExec = p->waiter->ds + p->waiter->maxds;
+        emscripten_async_call(MegaApiImpl::emscriptenLoop, p, p->waiter->maxds * 100);
+    }
+}
+#endif
 
 MegaApiImpl::~MegaApiImpl()
 {
@@ -2593,14 +2700,14 @@ handle MegaApiImpl::base64ToHandle(const char* base64Handle)
 	if(!base64Handle) return UNDEF;
 
 	handle h = 0;
-	Base64::atob(base64Handle,(byte*)&h,MegaClient::NODEHANDLE);
+	Base64::atob(base64Handle,(byte*)&h, sizeof h);
     return h;
 }
 
-char *MegaApiImpl::handleToBase64(MegaHandle handle)
+char *MegaApiImpl::handleToBase64(MegaHandle handle, int binarySize)
 {
-    char *base64Handle = new char[12];
-    Base64::btoa((byte*)&(handle),MegaClient::NODEHANDLE,base64Handle);
+    char *base64Handle = new char[binarySize * 4 / 3 + 4];
+    Base64::btoa((byte*)&(handle), binarySize, base64Handle);
     return base64Handle;
 }
 
@@ -2631,7 +2738,7 @@ void MegaApiImpl::addEntropy(char *data, unsigned int size)
         EdDSA::rng.IncorporateEntropy((const byte*)data, size);
 #endif
 
-#if (!defined(_WIN32) && !defined(USE_CURL_PUBLIC_KEY_PINNING)) || defined(WINDOWS_PHONE)
+#if (!defined(_WIN32) && !defined(USE_CURL_PUBLIC_KEY_PINNING) && !defined(EMSCRIPTEN)) || defined(WINDOWS_PHONE)
     RAND_seed(data, size);
 #endif
 }
@@ -2660,6 +2767,11 @@ void MegaApiImpl::killSession(MegaHandle sessionHandle, MegaRequestListener *lis
     request->setNodeHandle(sessionHandle);
     requestQueue.push(request);
     waiter->notify();
+}
+
+void MegaApiImpl::killSession(const char *sessionHandle, MegaRequestListener *listener)
+{
+    killSession(base64ToHandle(sessionHandle), listener);
 }
 
 void MegaApiImpl::getUserData(MegaRequestListener *listener)
@@ -2919,7 +3031,7 @@ void MegaApiImpl::loop()
         if(r & Waiter::NEEDEXEC)
         {
             sendPendingTransfers();
-            sendPendingRequests();
+            sendPendingRequests();           
             if(threadExit)
                 break;
 
@@ -3177,6 +3289,11 @@ void MegaApiImpl::getPaymentId(handle productHandle, MegaRequestListener *listen
     waiter->notify();
 }
 
+void MegaApiImpl::getPaymentId(const char *productHandle, MegaRequestListener *listener)
+{
+    getPaymentId(base64ToHandle(productHandle), listener);
+}
+
 void MegaApiImpl::upgradeAccount(MegaHandle productHandle, int paymentMethod, MegaRequestListener *listener)
 {
     MegaRequestPrivate *request = new MegaRequestPrivate(MegaRequest::TYPE_UPGRADE_ACCOUNT, listener);
@@ -3184,6 +3301,11 @@ void MegaApiImpl::upgradeAccount(MegaHandle productHandle, int paymentMethod, Me
     request->setNumber(paymentMethod);
     requestQueue.push(request);
     waiter->notify();
+}
+
+void MegaApiImpl::upgradeAccount(const char *productHandle, int paymentMethod, MegaRequestListener *listener)
+{
+    upgradeAccount(base64ToHandle(productHandle), paymentMethod, listener);
 }
 
 void MegaApiImpl::submitPurchaseReceipt(int gateway, const char *receipt, MegaRequestListener *listener)
@@ -3538,16 +3660,21 @@ void MegaApiImpl::replyContactRequest(MegaContactRequest *r, int action, MegaReq
     waiter->notify();
 }
 
-void MegaApiImpl::removeContact(MegaUser *user, MegaRequestListener* listener)
+void MegaApiImpl::removeContact(const char *email, MegaRequestListener* listener)
 {
 	MegaRequestPrivate *request = new MegaRequestPrivate(MegaRequest::TYPE_REMOVE_CONTACT, listener);
-    if(user)
+    if(email)
     {
-        request->setEmail(user->getEmail());
+        request->setEmail(email);
     }
 
 	requestQueue.push(request);
     waiter->notify();
+}
+
+void MegaApiImpl::removeContact(MegaUser *user, MegaRequestListener* listener)
+{
+	removeContact(user ? user->getEmail() : NULL, listener);
 }
 
 void MegaApiImpl::pauseTransfers(bool pause, int direction, MegaRequestListener* listener)
@@ -3600,6 +3727,15 @@ void MegaApiImpl::setDownloadMethod(int method)
             break;
         case MegaApi::TRANSFER_METHOD_AUTO:
             client->autodownport = true;
+            break;
+        case MegaApi::TRANSFER_METHOD_AUTO_NORMAL:
+            client->usealtdownport = false;
+            client->autodownport = true;
+            break;
+        case MegaApi::TRANSFER_METHOD_AUTO_ALTERNATIVE:
+            client->usealtdownport = true;
+            client->autodownport = true;
+            break;
         default:
             break;
     }
@@ -3619,6 +3755,15 @@ void MegaApiImpl::setUploadMethod(int method)
             break;
         case MegaApi::TRANSFER_METHOD_AUTO:
             client->autoupport = true;
+            break;
+        case MegaApi::TRANSFER_METHOD_AUTO_NORMAL:
+            client->usealtupport = false;
+            client->autoupport = true;
+            break;
+        case MegaApi::TRANSFER_METHOD_AUTO_ALTERNATIVE:
+            client->usealtupport = true;
+            client->autoupport = true;
+            break;
         default:
             break;
     }
@@ -3628,7 +3773,14 @@ int MegaApiImpl::getDownloadMethod()
 {
     if (client->autodownport)
     {
-        return MegaApi::TRANSFER_METHOD_AUTO;
+        if(client->usealtdownport)
+        {
+            return MegaApi::TRANSFER_METHOD_AUTO_ALTERNATIVE;
+        }
+        else
+        {
+            return MegaApi::TRANSFER_METHOD_AUTO_NORMAL;
+        }
     }
 
     if (client->usealtdownport)
@@ -3643,7 +3795,14 @@ int MegaApiImpl::getUploadMethod()
 {
     if (client->autoupport)
     {
-        return MegaApi::TRANSFER_METHOD_AUTO;
+        if(client->usealtupport)
+        {
+            return MegaApi::TRANSFER_METHOD_AUTO_ALTERNATIVE;
+        }
+        else
+        {
+            return MegaApi::TRANSFER_METHOD_AUTO_NORMAL;
+        }
     }
 
     if (client->usealtupport)
@@ -3673,6 +3832,25 @@ MegaTransferList *MegaApiImpl::getTransfers()
         }
     }
 
+    MegaTransferList *result = new MegaTransferListPrivate(transfers.data(), transfers.size());
+
+    sdkMutex.unlock();
+    return result;
+}
+
+MegaTransferList *MegaApiImpl::getStreamingTransfers()
+{
+    sdkMutex.lock();
+
+    vector<MegaTransfer *> transfers;
+    for (std::map<int, MegaTransferPrivate *>::iterator it = transferMap.begin(); it != transferMap.end(); it++)
+    {
+        MegaTransferPrivate *transfer = it->second;
+        if (transfer->isStreamingTransfer())
+        {
+            transfers.push_back(transfer);
+        }
+    }
     MegaTransferList *result = new MegaTransferListPrivate(transfers.data(), transfers.size());
 
     sdkMutex.unlock();
@@ -5220,6 +5398,7 @@ void MegaApiImpl::transfer_failed(Transfer* tr, error e)
 
 void MegaApiImpl::transfer_limit(Transfer* t)
 {
+    LOG_warn << "Transfer limit";
     if(transferMap.find(t->tag) == transferMap.end()) return;
     MegaTransferPrivate* transfer = transferMap.at(t->tag);
     transfer->setUpdateTime(Waiter::ds);
@@ -5287,7 +5466,7 @@ dstime MegaApiImpl::pread_failure(error e, int retry, void* param)
 	transfer->setDeltaSize(0);
 	transfer->setSpeed(0);
 	transfer->setLastBytes(NULL);
-	if (retry < transfer->getMaxRetries())
+	if (retry < transfer->getMaxRetries() && e != API_EINCOMPLETE)
 	{
         fireOnTransferTemporaryError(transfer, MegaError(e));
 		return (dstime)(retry*10);
@@ -5301,20 +5480,56 @@ dstime MegaApiImpl::pread_failure(error e, int retry, void* param)
 
 bool MegaApiImpl::pread_data(byte *buffer, m_off_t len, m_off_t, void* param)
 {
-	MegaTransferPrivate *transfer = (MegaTransferPrivate *)param;
-	transfer->setUpdateTime(Waiter::ds);
+    MegaTransferPrivate *transfer = (MegaTransferPrivate *)param;
+
+    if(!transfer->getStartTime())
+    {
+        transfer->setStartTime(Waiter::ds);
+    }
+
+    m_off_t deltaSize = len;
+    transfer->setDeltaSize(deltaSize);
+
+    dstime currentTime = Waiter::ds;
+    long long speed = 0;
+
+    totalDownloadedBytes += deltaSize;
+    while(downloadBytes.size())
+    {
+        dstime deltaTime = currentTime - downloadTimes[0];
+        if(deltaTime <= 50)
+        {
+            break;
+        }
+
+        downloadPartialBytes -= downloadBytes[0];
+        downloadBytes.erase(downloadBytes.begin());
+        downloadTimes.erase(downloadTimes.begin());
+    }
+
+    downloadBytes.push_back(deltaSize);
+    downloadTimes.push_back(currentTime);
+    downloadPartialBytes += deltaSize;
+
+    downloadSpeed = (downloadPartialBytes * 10) / 50;
+    speed = downloadSpeed;
+
+    if(currentTime < transfer->getStartTime())
+        transfer->setStartTime(currentTime);
+
+    transfer->setSpeed(speed);
+    transfer->setUpdateTime(currentTime);
     transfer->setLastBytes((char *)buffer);
     transfer->setDeltaSize(len);
-    totalDownloadedBytes += len;
-	transfer->setTransferredBytes(transfer->getTransferredBytes()+len);
+    transfer->setTransferredBytes(transfer->getTransferredBytes()+len);
 
-	bool end = (transfer->getTransferredBytes() == transfer->getTotalBytes());
+    bool end = (transfer->getTransferredBytes() == transfer->getTotalBytes());
     fireOnTransferUpdate(transfer);
     if(!fireOnTransferData(transfer) || end)
-	{
+    {
         fireOnTransferFinish(transfer, end ? MegaError(API_OK) : MegaError(API_EINCOMPLETE));
 		return end;
-	}
+    }
     return true;
 }
 
@@ -5524,7 +5739,7 @@ void MegaApiImpl::syncupdate_put(Sync *sync, LocalNode *localNode, const char *p
 
 void MegaApiImpl::syncupdate_remote_file_addition(Sync *sync, Node *n)
 {
-    LOG_debug << "Sync - remote file addition detected " << n->displayname();
+    LOG_debug << "Sync - remote file addition detected " << n->displayname() << " Nhandle: " << LOG_NODEHANDLE(n->nodehandle);
     client->abortbackoff(false);
 
     if(syncMap.find(sync->tag) == syncMap.end()) return;
@@ -6206,6 +6421,12 @@ void MegaApiImpl::notify_retry(dstime dsdelta)
     if(previousFlag != waitingRequest)
         fireOnGlobalSyncStateChanged();
 #endif
+
+    if (dsdelta && requestMap.size() == 1)
+    {
+        MegaRequestPrivate *request = requestMap.begin()->second;
+        fireOnRequestTemporaryError(request, MegaError(API_EAGAIN));
+    }
 }
 
 // callback for non-EAGAIN request-level errors
@@ -7325,6 +7546,11 @@ MegaError MegaApiImpl::checkAccess(MegaNode* megaNode, int level)
 	return e;
 }
 
+int MegaApiImpl::checkAccess(const char *handle, int level)
+{
+	return checkAccess(getNodeByBase64Handle(handle), level).getErrorCode();
+}
+
 MegaError MegaApiImpl::checkMove(MegaNode* megaNode, MegaNode* targetNode)
 {
 	if(!megaNode || !targetNode) return MegaError(API_EARGS);
@@ -7342,6 +7568,11 @@ MegaError MegaApiImpl::checkMove(MegaNode* megaNode, MegaNode* targetNode)
     sdkMutex.unlock();
 
     return e;
+}
+
+int MegaApiImpl::checkMove(const char *handle, const char *targetHandle)
+{
+	return checkMove(getNodeByBase64Handle(handle), getNodeByBase64Handle(targetHandle)).getErrorCode();
 }
 
 bool MegaApiImpl::isFilesystemAvailable()
@@ -7963,6 +8194,11 @@ MegaNode* MegaApiImpl::getNodeByHandle(handle handle)
     return result;
 }
 
+MegaNode *MegaApiImpl::getNodeByBase64Handle(const char *nodehandle)
+{
+    return getNodeByHandle(base64ToHandle(nodehandle));
+}
+
 MegaContactRequest *MegaApiImpl::getContactRequestByHandle(MegaHandle handle)
 {
     sdkMutex.lock();
@@ -7974,6 +8210,11 @@ MegaContactRequest *MegaApiImpl::getContactRequestByHandle(MegaHandle handle)
     MegaContactRequest* request = MegaContactRequestPrivate::fromContactRequest(client->pcrindex.at(handle));
     sdkMutex.unlock();
     return request;
+}
+
+MegaContactRequest *MegaApiImpl::getContactRequestByBase64Handle(const char *handle)
+{
+    return getContactRequestByHandle(base64ToHandle(handle));
 }
 
 void MegaApiImpl::sendPendingTransfers()
@@ -9148,31 +9389,56 @@ void MegaApiImpl::sendPendingRequests()
             if(transferMap.find(transferTag) == transferMap.end()) { e = API_ENOENT; break; };
 
             MegaTransferPrivate* megaTransfer = transferMap.at(transferTag);
-            Transfer *transfer = megaTransfer->getTransfer();
 
-            #ifdef _WIN32
-                if(transfer->type==GET)
-                {
-                    transfer->localfilename.append("", 1);
-                    WIN32_FILE_ATTRIBUTE_DATA fad;
-                    if (GetFileAttributesExW((LPCWSTR)transfer->localfilename.data(), GetFileExInfoStandard, &fad))
-                        SetFileAttributesW((LPCWSTR)transfer->localfilename.data(), fad.dwFileAttributes & ~FILE_ATTRIBUTE_HIDDEN);
-                    transfer->localfilename.resize(transfer->localfilename.size()-1);
-                }
-            #endif
-
-            megaTransfer->setSyncTransfer(true);
-            megaTransfer->setLastErrorCode(API_EINCOMPLETE);
-
-            file_list files = transfer->files;
-            file_list::iterator iterator = files.begin();
-            while (iterator != files.end())
+            if (!megaTransfer->isStreamingTransfer())
             {
-                File *file = *iterator;
-                iterator++;
-                if(!file->syncxfer) client->stopxfer(file);
+                Transfer *transfer = megaTransfer->getTransfer();
+
+                #ifdef _WIN32
+                    if(transfer->type==GET)
+                    {
+                        transfer->localfilename.append("", 1);
+                        WIN32_FILE_ATTRIBUTE_DATA fad;
+                        if (GetFileAttributesExW((LPCWSTR)transfer->localfilename.data(), GetFileExInfoStandard, &fad))
+                            SetFileAttributesW((LPCWSTR)transfer->localfilename.data(), fad.dwFileAttributes & ~FILE_ATTRIBUTE_HIDDEN);
+                        transfer->localfilename.resize(transfer->localfilename.size()-1);
+                    }
+                #endif
+
+                megaTransfer->setSyncTransfer(true);
+                megaTransfer->setLastErrorCode(API_EINCOMPLETE);
+
+                file_list files = transfer->files;
+                file_list::iterator iterator = files.begin();
+                while (iterator != files.end())
+                {
+                    File *file = *iterator;
+                    iterator++;
+                    if(!file->syncxfer) client->stopxfer(file);
+                }
+                fireOnRequestFinish(request, MegaError(API_OK));
             }
-            fireOnRequestFinish(request, MegaError(API_OK));
+            else
+            {
+                m_off_t startPos = megaTransfer->getStartPos();
+                m_off_t endPos = megaTransfer->getEndPos();
+                m_off_t totalBytes = endPos - startPos + 1;
+
+                MegaNode *publicNode = megaTransfer->getPublicNode();
+                if (publicNode)
+                {
+                    client->preadabort(publicNode->getHandle(), startPos, totalBytes);
+                }
+                else
+                {
+                    Node *node = client->nodebyhandle(megaTransfer->getNodeHandle());
+                    if (node)
+                    {
+                        client->preadabort(node, startPos, totalBytes);
+                    }
+                }
+                fireOnRequestFinish(request, MegaError(API_OK));
+            }
             break;
         }
         case MegaRequest::TYPE_CANCEL_TRANSFERS:
@@ -9848,14 +10114,29 @@ long long MegaAccountDetailsPrivate::getStorageUsed(MegaHandle handle)
     return details.storage[handle].bytes;
 }
 
+long long MegaAccountDetailsPrivate::getStorageUsed(const char *handle)
+{
+    return getStorageUsed(MegaApiImpl::base64ToHandle(handle));
+}
+
 long long MegaAccountDetailsPrivate::getNumFiles(MegaHandle handle)
 {
     return details.storage[handle].files;
 }
 
+long long MegaAccountDetailsPrivate::getNumFiles(const char *handle)
+{
+    return getNumFiles(MegaApiImpl::base64ToHandle(handle));
+}
+
 long long MegaAccountDetailsPrivate::getNumFolders(MegaHandle handle)
 {
     return details.storage[handle].folders;
+}
+
+long long MegaAccountDetailsPrivate::getNumFolders(const char *handle)
+{
+    return getNumFolders(MegaApiImpl::base32ToHandle(handle));
 }
 
 MegaAccountDetails* MegaAccountDetailsPrivate::copy()
@@ -10082,6 +10363,16 @@ MegaPricingPrivate::~MegaPricingPrivate()
 int MegaPricingPrivate::getNumProducts()
 {
     return handles.size();
+}
+
+char *MegaPricingPrivate::getBase64Handle(int productIndex)
+{
+    if ((unsigned)productIndex < handles.size())
+    {
+        return MegaApiImpl::handleToBase64(handles[productIndex], MegaClient::PURCHASEHANDLE);
+    }
+
+    return NULL;
 }
 
 handle MegaPricingPrivate::getHandle(int productIndex)
@@ -10463,6 +10754,16 @@ bool MegaAccountSessionPrivate::isAlive() const
 MegaHandle MegaAccountSessionPrivate::getHandle() const
 {
     return session.id;
+}
+
+char *MegaAccountSessionPrivate::getBase64Handle() const
+{
+    if (session.id == UNDEF)
+    {
+        return NULL;
+    }
+    
+    return MegaApiImpl::handleToBase64(session.id, MegaClient::SESSIONHANDLE);
 }
 
 MegaAccountSessionPrivate::MegaAccountSessionPrivate(const AccountSession *session)

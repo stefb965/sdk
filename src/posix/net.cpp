@@ -366,6 +366,27 @@ void CurlHttpIO::disconnect()
     ares_destroy(ares);
     curl_multi_cleanup(curlm);
 
+#if defined(_WIN32) && !defined(WINDOWS_PHONE)
+    for (unsigned int i = 0; i < aressockets.size(); i++)
+    {
+        if (aressockets[i].handle != WSA_INVALID_EVENT)
+        {
+            WSACloseEvent(aressockets[i].handle);
+        }
+    }
+    aressockets.clear();
+
+    for (std::map<int, SockInfo>::iterator it = curlsockets.begin(); it != curlsockets.end(); it++)
+    {
+        SockInfo &info = it->second;
+        if (info.handle != WSA_INVALID_EVENT)
+        {
+            WSACloseEvent(info.handle);
+        }
+    }
+    curlsockets.clear();
+#endif
+
     lastdnspurge = Waiter::ds + DNS_CACHE_TIMEOUT_DS / 2;
     dnscache.clear();
 
@@ -1145,6 +1166,7 @@ void CurlHttpIO::post(HttpReq* req, const char* data, unsigned len)
 
             if (!entry.ipv6.size() && !entry.ipv4.size())
             {
+                LOG_debug << "DNS cache record expired for " << it->first;
                 dnscache.erase(it++);
             }
             else
@@ -1182,6 +1204,7 @@ void CurlHttpIO::post(HttpReq* req, const char* data, unsigned len)
     {
         if (dnsEntry && dnsEntry->ipv6.size() && Waiter::ds - dnsEntry->ipv6timestamp < DNS_CACHE_TIMEOUT_DS)
         {
+            LOG_debug << "DNS cache hit for " << httpctx->hostname << " (IPv6)";
             std::ostringstream oss;
             httpctx->isIPv6 = true;
             oss << "[" << dnsEntry->ipv6 << "]";
@@ -1199,6 +1222,7 @@ void CurlHttpIO::post(HttpReq* req, const char* data, unsigned len)
     {
         if (dnsEntry && dnsEntry->ipv4.size() && Waiter::ds - dnsEntry->ipv4timestamp < DNS_CACHE_TIMEOUT_DS)
         {
+            LOG_debug << "DNS cache hit for " << httpctx->hostname << " (IPv4)";
             httpctx->isIPv6 = false;
             httpctx->hostip = dnsEntry->ipv4;
             httpctx->ares_pending = 0;
@@ -1314,8 +1338,7 @@ bool CurlHttpIO::doio()
 {
     bool result;
     CURLMsg* msg;
-    int dummy;
-
+    int dummy = 0;
 
 #if !defined(_WIN32) || defined(WINDOWS_PHONE)
     if (waiter)
@@ -1335,7 +1358,32 @@ bool CurlHttpIO::doio()
 #if !defined(_WIN32) || defined(WINDOWS_PHONE)
     curl_multi_perform(curlm, &dummy);
 #else
-    curl_multi_socket_all(curlm, &dummy);
+    bool active = false;
+    for (std::map<int, SockInfo>::iterator it = curlsockets.begin(); it != curlsockets.end();)
+    {
+        SockInfo &info = (it++)->second;
+        if (!info.mode || info.handle == WSA_INVALID_EVENT)
+        {
+            continue;
+        }
+
+        if (WSAWaitForMultipleEvents(1, &info.handle, TRUE, 0, FALSE) == WSA_WAIT_EVENT_0)
+        {
+            active = true;
+            WSAResetEvent(info.handle);
+            curl_multi_socket_action(curlm,
+                                     info.fd,
+                                     ((info.mode & SockInfo::READ) ? CURL_CSELECT_IN : 0)
+                                   | ((info.mode & SockInfo::WRITE) ? CURL_CSELECT_OUT : 0),
+                                     &dummy);
+            break;
+        }
+    }
+
+    if (!active)
+    {
+        curl_multi_socket_action(curlm, CURL_SOCKET_TIMEOUT, 0, &dummy);
+    }
 #endif
 
     while ((msg = curl_multi_info_read(curlm, &dummy)))
@@ -1393,59 +1441,61 @@ bool CurlHttpIO::doio()
             if (req->status == REQ_FAILURE && !req->httpstatus)
             {                
                 CurlHttpContext* httpctx = (CurlHttpContext*)req->httpiohandle;
-
-                // remove the IP from the DNS cache
-                CurlDNSEntry &dnsEntry = dnscache[httpctx->hostname];
-
-                if (httpctx->isIPv6)
+                if (httpctx)
                 {
-                    dnsEntry.ipv6.clear();
-                    dnsEntry.ipv6timestamp = 0;
-                }
-                else
-                {
-                    dnsEntry.ipv4.clear();
-                    dnsEntry.ipv4timestamp = 0;
-                }
+                    // remove the IP from the DNS cache
+                    CurlDNSEntry &dnsEntry = dnscache[httpctx->hostname];
 
-                ipv6requestsenabled = !httpctx->isIPv6 && ipv6available();
-
-                if (ipv6requestsenabled)
-                {
-                    // change the protocol of the proxy after fails contacting
-                    // MEGA servers with both protocols (IPv4 and IPv6)
-                    ipv6proxyenabled = !ipv6proxyenabled && ipv6available();
-                    request_proxy_ip();
-                }
-                else if (httpctx->isIPv6)
-                {
-                    ipv6deactivationtime = Waiter::ds;
-
-                    // for IPv6 errors, try IPv4 before sending an error to the engine
-                    if((dnsEntry.ipv4.size() && Waiter::ds - dnsEntry.ipv4timestamp < DNS_CACHE_TIMEOUT_DS) || httpctx->ares_pending)
+                    if (httpctx->isIPv6)
                     {
-                        curl_multi_remove_handle(curlm, msg->easy_handle);
-                        curl_easy_cleanup(msg->easy_handle);
-                        curl_slist_free_all(httpctx->headers);
-                        httpctx->headers = NULL;
-                        httpctx->curl = NULL;
-                        req->httpio = this;
-                        req->in.clear();
-                        req->status = REQ_INFLIGHT;
+                        dnsEntry.ipv6.clear();
+                        dnsEntry.ipv6timestamp = 0;
+                    }
+                    else
+                    {
+                        dnsEntry.ipv4.clear();
+                        dnsEntry.ipv4timestamp = 0;
+                    }
 
-                        if(dnsEntry.ipv4.size() && Waiter::ds - dnsEntry.ipv4timestamp < DNS_CACHE_TIMEOUT_DS)
+                    ipv6requestsenabled = !httpctx->isIPv6 && ipv6available();
+
+                    if (ipv6requestsenabled)
+                    {
+                        // change the protocol of the proxy after fails contacting
+                        // MEGA servers with both protocols (IPv4 and IPv6)
+                        ipv6proxyenabled = !ipv6proxyenabled && ipv6available();
+                        request_proxy_ip();
+                    }
+                    else if (httpctx->isIPv6)
+                    {
+                        ipv6deactivationtime = Waiter::ds;
+
+                        // for IPv6 errors, try IPv4 before sending an error to the engine
+                        if((dnsEntry.ipv4.size() && Waiter::ds - dnsEntry.ipv4timestamp < DNS_CACHE_TIMEOUT_DS) || httpctx->ares_pending)
                         {
-                            LOG_debug << "Retrying using IPv4 from cache";
-                            httpctx->isIPv6 = false;
-                            httpctx->hostip = dnsEntry.ipv4;
-                            send_request(httpctx);
+                            curl_multi_remove_handle(curlm, msg->easy_handle);
+                            curl_easy_cleanup(msg->easy_handle);
+                            curl_slist_free_all(httpctx->headers);
+                            httpctx->headers = NULL;
+                            httpctx->curl = NULL;
+                            req->httpio = this;
+                            req->in.clear();
+                            req->status = REQ_INFLIGHT;
+
+                            if(dnsEntry.ipv4.size() && Waiter::ds - dnsEntry.ipv4timestamp < DNS_CACHE_TIMEOUT_DS)
+                            {
+                                LOG_debug << "Retrying using IPv4 from cache";
+                                httpctx->isIPv6 = false;
+                                httpctx->hostip = dnsEntry.ipv4;
+                                send_request(httpctx);
+                            }
+                            else
+                            {
+                                httpctx->hostip.clear();
+                                LOG_debug << "Retrying with the pending DNS response";
+                            }
+                            return true;
                         }
-                        else
-                        {
-                            httpctx->hostip.clear();
-                            LOG_debug << "Retrying with the pending DNS response";
-                        }
-                        return true;
                     }
                 }
             }
@@ -1550,9 +1600,9 @@ size_t CurlHttpIO::read_data(void* ptr, size_t size, size_t nmemb, void* source)
 
     curl_off_t nread = ((HttpReq*)source)->out->size();
     
-    if (nread > nmemb)
+    if (nread > (size * nmemb))
     {
-        nread = nmemb;
+        nread = size * nmemb;
     }
     
     if (!nread)
@@ -1566,24 +1616,28 @@ size_t CurlHttpIO::read_data(void* ptr, size_t size, size_t nmemb, void* source)
     return nread;
 }
 
-size_t CurlHttpIO::write_data(void* ptr, size_t, size_t nmemb, void* target)
+size_t CurlHttpIO::write_data(void* ptr, size_t size, size_t nmemb, void* target)
 {
-    if (((HttpReq*)target)->chunked)
-    {
-        ((CurlHttpIO*)((HttpReq*)target)->httpio)->statechange = true;
-    }
-
     if(((HttpReq*)target)->httpio)
     {
-        ((HttpReq*)target)->put(ptr, nmemb, true);
+        if (((HttpReq*)target)->chunked)
+        {
+            ((CurlHttpIO*)((HttpReq*)target)->httpio)->statechange = true;
+        }
+
+        if (size * nmemb)
+        {
+            ((HttpReq*)target)->put(ptr, size * nmemb, true);
+        }
+
         ((HttpReq*)target)->httpio->lastdata = Waiter::ds;
     }
 
-    return nmemb;
+    return size * nmemb;
 }
 
 // set contentlength according to Original-Content-Length header
-size_t CurlHttpIO::check_header(void* ptr, size_t, size_t nmemb, void* target)
+size_t CurlHttpIO::check_header(void* ptr, size_t size, size_t nmemb, void* target)
 {
     if (!memcmp(ptr, "Content-Length:", 15))
     {
@@ -1595,6 +1649,10 @@ size_t CurlHttpIO::check_header(void* ptr, size_t, size_t nmemb, void* target)
         {
             ((HttpReq*)target)->setcontentlength(atol((char*)ptr + 24));
         }
+        else
+        {
+            return size * nmemb;
+        }
     }
 
     if (((HttpReq*)target)->httpio)
@@ -1602,7 +1660,7 @@ size_t CurlHttpIO::check_header(void* ptr, size_t, size_t nmemb, void* target)
         ((HttpReq*)target)->httpio->lastdata = Waiter::ds;
     }
 
-    return nmemb;
+    return size * nmemb;
 }
 
 #if defined(_WIN32) && !defined(WINDOWS_PHONE)
@@ -1614,11 +1672,11 @@ int CurlHttpIO::socket_callback(CURL *, curl_socket_t s, int what, void *userp, 
     {
         LOG_debug << "Removing socket " << s;
         HANDLE handle = httpio->curlsockets[s].handle;
+        httpio->curlsockets.erase(s);
         if (handle != WSA_INVALID_EVENT)
         {
             WSACloseEvent (handle);
         }
-        httpio->curlsockets.erase(s);
     }
     else
     {

@@ -1,0 +1,25 @@
+--- osrng.cpp.orig	Wed Feb 20 14:30:52 2013
++++ osrng.cpp	Fri Dec 18 19:20:32 2015
+@@ -189,2 +189,22 @@
+ 
++#elif defined(EMSCRIPTEN)
++#include <emscripten.h>
++
++NAMESPACE_BEGIN(CryptoPP)
++
++void AutoSeededRandomPool::Reseed(bool blocking, unsigned int seedSize)
++{
++	SecByteBlock seed(seedSize);
++	byte *tmp = (byte *)seed;
++	unsigned int len = seedSize;
++	while (len) {
++		*tmp++ = EM_ASM_INT({
++			return Module.randomDevice($0);
++		}, len--);
++	}
++	IncorporateEntropy(seed, seedSize);
++}
++
++NAMESPACE_END
++
+ #endif

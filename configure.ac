@@ -330,6 +330,10 @@ MEGASDK_CHECK_PYTHON
 MEGASDK_CHECK_PHP
 MEGASDK_CHECK_JAVA
 
+if test "x$enable_javascript" = "xyes" ; then
+    CPPFLAGS="$CPPFLAGS --bind"
+fi
+
 # Tests
 AC_MSG_CHECKING([if building tests])
 AC_ARG_ENABLE(tests,

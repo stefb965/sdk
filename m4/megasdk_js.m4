@@ -7,13 +7,7 @@ SAVE_LDFLAGS="$LDFLAGS"
 SAVE_CXXFLAGS="$CXXFLAGS"
 SAVE_CPPFLAGS="$CPPFLAGS"
 
-AC_MSG_CHECKING([if building JavaScript bindings])
-AC_ARG_ENABLE(javascript,
-    AS_HELP_STRING([--enable-javascript], [build JavaScript language bindings]),
-    [AC_MSG_RESULT([yes])],
-    [AC_MSG_RESULT([no])
-     enable_javascript=no]
-)
+AS_CASE([$CXX], [*em++], [enable_javascript="yes"], [enable_javascript="no"])
 
 if test "x$enable_javascript" = "xyes" ; then
 
@@ -81,12 +75,19 @@ AC_ARG_WITH([emscripten],
     AC_SUBST(EMCC)
   ]
 )
-    AC_DEFINE(EMSCRIPTEN, [1], [Define to build JS bindings])
-fi
+
+AC_DEFINE(EMSCRIPTEN, [1], [Define to build JS bindings])
 
 AM_PATH_PYTHON
 if test -z "$PYTHON_VERSION"; then
     AC_MSG_ERROR([Python executable not found!])
+fi
+
+
+if test "x$enable_debug" = "xyes" ; then
+AC_DEFINE(EM_DEBUG_FLAG, [1], [Define to enable emscripten debug])
+fi
+
 fi
 
 AM_CONDITIONAL([BUILD_JS], [test "$enable_javascript" = "yes"])

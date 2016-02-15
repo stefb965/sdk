@@ -18,6 +18,8 @@ AC_MSG_RESULT([$enable_examples])
 USE_FUSE=0
 # if Examples are enables, check for specific libraries
 if test "x$enable_examples" = "xyes" ; then
+
+if test "x$enable_javascript" != "xyes" ; then
     #termcap
     AC_MSG_CHECKING(for termcap)
     AC_ARG_WITH(termcap,
@@ -208,6 +210,9 @@ if test "x$enable_examples" = "xyes" ; then
       AC_SUBST(FUSE_CXXFLAGS)
 fi
 AC_SUBST(USE_FUSE)
+
+# enable_js
+fi
 
 # if test
 fi

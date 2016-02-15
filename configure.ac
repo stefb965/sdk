@@ -305,7 +305,6 @@ if test "x$enable_javascript" = "xyes" ; then
     check_cares=false
     check_curl=false
     check_freeimage=false
-    check_examples=false
 fi
 
 # features checking
@@ -329,10 +328,6 @@ MEGASDK_CHECK_EXAMPLES
 MEGASDK_CHECK_PYTHON
 MEGASDK_CHECK_PHP
 MEGASDK_CHECK_JAVA
-
-if test "x$enable_javascript" = "xyes" ; then
-    CPPFLAGS="$CPPFLAGS --bind"
-fi
 
 # Tests
 AC_MSG_CHECKING([if building tests])

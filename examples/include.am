@@ -1,4 +1,22 @@
 # applications
+
+if BUILD_JS
+
+PREJS = --pre-js bindings/js/prefix.js
+POSTJS = --post-js bindings/js/glue.js --post-js bindings/js/postfix.js --post-js bindings/js/io.js
+JS_LIB = --js-library bindings/js/library.js
+JS_SRC = examples/js/test.cpp bindings/js/glue_wrapper.cpp
+JS_INC = -Iinclude -Iinclude/mega -Iinclude/mega/js
+JS_OPT = -O2
+
+test_js: $(top_builddir)/src/libmega.la
+	python $(EMSCRIPTEN_ROOT)/tools/webidl_binder.py bindings/js/megaapi.idl bindings/js/glue
+	$(CXX) $(JS_SRC) $(JS_INC) $(PREJS) $(POSTJS) $(JS_LIB) $(JS_OPT) $(top_builddir)/src/.libs/libmega.so -o examples/js/test.html
+
+noinst_PROGRAMS += test_js
+
+else
+
 EXAMPLES = examples/megacli examples/megasimplesync
 
 if BUILD_FUSE_EXAMPLE
@@ -53,4 +71,6 @@ examples_megacli_CXXFLAGS += -static
 examples_megacli_LDFLAGS = -Wl,-static -all-static
 examples_megasimplesync_LDFLAGS = -Wl,-static -all-static
 endif
+endif
+
 endif

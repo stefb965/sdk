@@ -46,12 +46,6 @@ noinst_PROGRAMS=
 EXTRA_DIST =
 
 include src/include.am
-include examples/include.am
-include tests/include.am
-
-if BUILD_JS
-include bindings/js/include.am
-endif
 
 if BUILD_PYTHON
 include bindings/python/include.am
@@ -64,6 +58,9 @@ endif
 if BUILD_JAVA
 include bindings/java/include.am
 endif
+
+include examples/include.am
+include tests/include.am
 
 SUBDIRS = include
 

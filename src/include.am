@@ -22,6 +22,13 @@ endif
 # add library version
 src_libmega_la_LDFLAGS = -version-info $(VERSION_INFO)
 
+if BUILD_JS
+src_libmega_la_LDFLAGS += --js-library bindings/js/library.js \
+    -s EXPORT_NAME=\"MEGASDK\" -s ALLOW_MEMORY_GROWTH=1 \
+    -s ASM_JS=1 -s NO_EXIT_RUNTIME=1 -s NO_FILESYSTEM=1 -s NO_BROWSER=1 \
+    -s ABORTING_MALLOC=0
+endif
+
 if ENABLE_STATIC
 src_libmega_la_LDFLAGS += -Wl,-static -all-static
 endif
@@ -96,11 +103,11 @@ src_libmega_la_SOURCES += src/js/consolewaiter.cpp
 
 # Posix
 else
-src_libmega_la_SOURCES += src/js/fs.cpp
-src_libmega_la_SOURCES += src/js/console.cpp
-src_libmega_la_SOURCES += src/js/net.cpp
-src_libmega_la_SOURCES += src/js/waiter.cpp
-src_libmega_la_SOURCES += src/js/consolewaiter.cpp
+src_libmega_la_SOURCES += src/posix/fs.cpp
+src_libmega_la_SOURCES += src/posix/console.cpp
+src_libmega_la_SOURCES += src/posix/net.cpp
+src_libmega_la_SOURCES += src/posix/waiter.cpp
+src_libmega_la_SOURCES += src/posix/consolewaiter.cpp
 
 src_libmega_la_SOURCES += src/thread/posixthread.cpp
 

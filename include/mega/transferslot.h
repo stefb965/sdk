@@ -56,8 +56,8 @@ struct MEGA_API TransferSlot
     // file attributes mutable
     int fileattrsmutable;
 
-    // storage server access URL
-    string tempurl;
+    // storage server access URLs
+    string tempurls[6];
 
     // maximum number of parallel connections and connection aray
     int connections;
@@ -85,6 +85,9 @@ struct MEGA_API TransferSlot
     // transfer failure flag
     bool failure;
     
+    // check if the slot has a temp URL
+    bool hastempurl();
+
     TransferSlot(Transfer*);
     ~TransferSlot();
 

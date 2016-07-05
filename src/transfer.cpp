@@ -44,7 +44,9 @@ Transfer::Transfer(MegaClient* cclient, direction_t ctype)
     finished = false;
     lastaccesstime = time(NULL);
     ultoken = NULL;
+    pendingdata = 0;
 
+    memset(serverpos, 0, sizeof(serverpos));
     faputcompletion_it = client->faputcompletion.end();
     transfers_it = client->transfers[type].end();
 }
@@ -145,9 +147,9 @@ bool Transfer::serialize(string *d)
 
     if (slot)
     {
-        ll = (unsigned short)slot->tempurl.size();
+        ll = (unsigned short)slot->tempurls[0].size();
         d->append((char*)&ll, sizeof(ll));
-        d->append(slot->tempurl.data(), ll);
+        d->append(slot->tempurls[0].data(), ll);
     }
     else
     {
@@ -344,14 +346,21 @@ void Transfer::failed(error e, dstime timeleft)
         }
 
         pos = 0;
+        memset(serverpos, 0, sizeof(serverpos));
     }
 
     if (defer && !(e == API_EOVERQUOTA && !timeleft))
     {        
+        bool israidtransfer = israid();
+
         failcount++;
         delete slot;
         slot = NULL;
-        client->transfercacheadd(this);
+
+        if (!israidtransfer)
+        {
+            client->transfercacheadd(this);
+        }
 
         LOG_debug << "Deferring transfer " << failcount;
     }
@@ -728,10 +737,84 @@ void Transfer::completefiles()
     ids.push_back(dbid);
 }
 
-m_off_t Transfer::nextpos()
+bool Transfer::israid()
+{
+    return slot && slot->tempurls[5].size();
+}
+
+int Transfer::numservers()
+{
+    if (!israid())
+    {
+        return 1;
+    }
+
+    return 6;
+}
+
+int Transfer::nextserver()
+{
+    if (!israid())
+    {
+        return 0;
+    }
+
+    int min = 5;
+    m_off_t minpos = -1;
+    for (int i = 5; i > 0; i--)
+    {
+        m_off_t maxpos = maxserverpos(i);
+        if (serverpos[i] < maxpos && (serverpos[i] < minpos || minpos == -1))
+        {
+            minpos = serverpos[i];
+            min = i;
+        }
+    }
+
+    return min;
+}
+
+m_off_t Transfer::maxserverpos(int serverid)
+{
+    if (!israid())
+    {
+        return size;
+    }
+
+    m_off_t numblocks = size / 16;
+    int reminingbytes = size % 16;
+
+    m_off_t completeblocks = numblocks / 5;
+    int remainingblocks = numblocks % 5;
+
+    m_off_t maxpos = completeblocks * 16;
+    if (serverid <= remainingblocks)
+    {
+        maxpos += 16;
+    }
+
+    if (serverid == 1)
+    {
+        maxpos += reminingbytes;
+    }
+
+    return maxpos;
+}
+
+m_off_t Transfer::nextserverpos(int serverid)
+{
+    if (!israid())
+    {
+        return nexttransferpos();
+    }
+
+    return serverpos[serverid];
+}
+
+m_off_t Transfer::nexttransferpos()
 {
     while (chunkmacs.find(ChunkedHash::chunkfloor(pos)) != chunkmacs.end())
-    {    
+    {
         if (chunkmacs[ChunkedHash::chunkfloor(pos)].finished)
         {
             pos = ChunkedHash::chunkceil(pos);
@@ -744,6 +827,98 @@ m_off_t Transfer::nextpos()
     }
 
     return pos;
+}
+
+void Transfer::updateserverpos(int serverid, m_off_t pos)
+{
+    serverpos[serverid] = pos;
+    if (!israid())
+    {
+        this->pos = pos;
+    }
+}
+
+void Transfer::newdata(int serverid, m_off_t serverpos, byte *data, m_off_t len)
+{
+    if (israid())
+    {
+        raiddata[serverid].assign((char *)data, len);
+        pendingdata += len;
+    }
+}
+
+bool Transfer::rebuilddata()
+{
+    if (!israid())
+    {
+        return true;
+    }
+
+    int c = 0;
+    for (int i = 1; i < 6; i++)
+    {
+        if (raiddata[i].size())
+        {
+            c++;
+        }
+    }
+
+    if (c < 5)
+    {
+        return false;
+    }
+
+    m_off_t index = data.size();
+    data.resize(index + pendingdata);
+
+    m_off_t reconstructed = 0;
+    while (reconstructed < pendingdata)
+    {
+        m_off_t bytepos = pos + index + reconstructed;
+        int raidnum = ((bytepos % 80) / 16) + 1;
+        m_off_t raidpos = 16 * (reconstructed / 80);
+
+        memcpy((void *)&data.data()[index + reconstructed],
+                &raiddata[raidnum].data()[raidpos], 16);
+        reconstructed += 16;
+    }
+    pendingdata = 0;
+
+    for (int i = 1; i < 6; i++)
+    {
+        raiddata[i].resize(0);
+    }
+
+    return true;
+}
+
+bool Transfer::chunkavailable()
+{
+    return (data.size() >= nextchunksize());
+}
+
+m_off_t Transfer::nextchunkstart()
+{
+    return ChunkedHash::chunkfloor(pos);
+}
+
+m_off_t Transfer::nextchunksize()
+{
+    m_off_t init = nextchunkstart();
+    m_off_t ceil = ChunkedHash::chunkceil(init);
+    if (ceil > size)
+    {
+        ceil = size;
+    }
+
+    return (ceil - init);
+}
+
+void Transfer::chunkwritten()
+{
+    m_off_t size = nextchunksize();
+    data = data.substr(size);
+    pos += size;
 }
 
 DirectReadNode::DirectReadNode(MegaClient* cclient, handle ch, bool cp, SymmCipher* csymmcipher, int64_t cctriv)

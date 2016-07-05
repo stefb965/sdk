@@ -2376,7 +2376,7 @@ bool MegaClient::dispatch(direction_t d)
                 if (nextit->second->cachedtempurl.size())
                 {
                     app->transfer_prepare(nextit->second);
-                    ts->tempurl =  nextit->second->cachedtempurl;
+                    ts->tempurls[0] =  nextit->second->cachedtempurl;
                     nextit->second->cachedtempurl.clear();
                 }
                 else
@@ -6915,7 +6915,7 @@ void MegaClient::notifynode(Node* n)
 
 void MegaClient::transfercacheadd(Transfer *transfer)
 {
-    if (tctable)
+    if (tctable && !transfer->israid())
     {
         LOG_debug << "Caching transfer";
         tctable->put(MegaClient::CACHEDTRANSFER, transfer, &tckey);

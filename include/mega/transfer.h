@@ -50,7 +50,15 @@ struct MEGA_API Transfer : public FileFingerprint
     // progress completed
     m_off_t progresscompleted;
 
+    // transfer position
     m_off_t pos;
+
+    // server position
+    m_off_t serverpos[6];
+
+    string data;
+    map<m_off_t, string> raiddata;
+    m_off_t pendingdata;
 
     byte filekey[FILENODEKEYLENGTH];
 
@@ -93,8 +101,43 @@ struct MEGA_API Transfer : public FileFingerprint
     // execute completion
     void completefiles();
 
-    // next position to download/upload
-    m_off_t nextpos();
+    bool israid();
+
+    // number of storage servers for the transfer
+    int numservers();
+
+    // next server to use
+    int nextserver();
+
+    // max position for the storage server
+    m_off_t maxserverpos(int serverid);
+
+    // next position to download/upload from a server
+    m_off_t nextserverpos(int serverid);
+
+    // next position to download/upload in the transfer
+    m_off_t nexttransferpos();
+
+    // set a new server position
+    void updateserverpos(int serverid, m_off_t pos);
+
+    // inform about new data received
+    void newdata(int serverid, m_off_t serverpos, byte *data, m_off_t len);
+
+    // rebuild data and check if there is any chunk ready
+    bool rebuilddata();
+
+    // check if there is any available chunk
+    bool chunkavailable();
+
+    // get the start offset of the next available chunk
+    m_off_t nextchunkstart();
+
+    // get the size of the next available chunk
+    m_off_t nextchunksize();
+
+    // notify that the first available chunk has been written to disk
+    void chunkwritten();
 
     // previous wrong fingerprint
     FileFingerprint badfp;

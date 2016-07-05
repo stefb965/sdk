@@ -149,6 +149,7 @@ struct MEGA_API HttpReq
 {
     reqstatus_t status;
     m_off_t pos;
+    int serverid;
 
     int httpstatus;
 

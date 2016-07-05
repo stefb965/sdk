@@ -177,6 +177,11 @@ int64_t TransferSlot::macsmac(chunkmac_map* macs)
     return MemAccess::get<int64_t>((const char*)mac);
 }
 
+bool TransferSlot::hastempurl()
+{
+    return tempurls[0].size();
+}
+
 // file transfer state machine
 void TransferSlot::doio(MegaClient* client)
 {
@@ -203,7 +208,7 @@ void TransferSlot::doio(MegaClient* client)
 
     retrying = false;
 
-    if (!tempurl.size())
+    if (!hastempurl())
     {
         return;
     }
@@ -314,30 +319,56 @@ void TransferSlot::doio(MegaClient* client)
                             errorcount = 0;
                             transfer->failcount = 0;
 
-                            reqs[i]->finalize(fa, &transfer->key, &transfer->chunkmacs, transfer->ctriv, 0, -1);
-
-                            if (transfer->progresscompleted == transfer->size)
+                            transfer->newdata(reqs[i]->serverid, ((HttpReqDL *)reqs[i])->dlpos, reqs[i]->buf, reqs[i]->bufpos);
+                            if (transfer->rebuilddata())
                             {
-                                // verify meta MAC
-                                if (!transfer->progresscompleted || (macsmac(&transfer->chunkmacs) == transfer->metamac))
+                                if (transfer->israid())
                                 {
-                                    client->transfercacheadd(transfer);
-
-                                    if (transfer->progresscompleted != progressreported)
+                                    while (transfer->chunkavailable())
                                     {
-                                        progressreported = transfer->progresscompleted;
-                                        lastdata = Waiter::ds;
+                                        m_off_t start = transfer->nextchunkstart();
+                                        m_off_t size = transfer->nextchunksize();
 
-                                        progress();
+                                        transfer->key.ctr_crypt((byte *)transfer->data.data(),
+                                                                size, start,
+                                                                transfer->ctriv,
+                                                                transfer->chunkmacs[transfer->pos].mac,
+                                                                false);
+
+                                        fa->fwrite((byte *)transfer->data.data(), size, start);
+                                        transfer->chunkmacs[transfer->pos].finished = true;
+                                        transfer->chunkmacs[transfer->pos].offset = 0;
+                                        transfer->chunkwritten();
                                     }
-
-                                    return transfer->complete();
                                 }
                                 else
                                 {
-                                    LOG_warn << "MAC verification failed";
-                                    transfer->chunkmacs.clear();
-                                    return transfer->failed(API_EKEY);
+                                    reqs[i]->finalize(fa, &transfer->key, &transfer->chunkmacs, transfer->ctriv, 0, -1);
+                                }
+
+                                if (transfer->progresscompleted == transfer->size)
+                                {
+                                    // verify meta MAC
+                                    if (!transfer->progresscompleted || (macsmac(&transfer->chunkmacs) == transfer->metamac))
+                                    {
+                                        client->transfercacheadd(transfer);
+
+                                        if (transfer->progresscompleted != progressreported)
+                                        {
+                                            progressreported = transfer->progresscompleted;
+                                            lastdata = Waiter::ds;
+
+                                            progress();
+                                        }
+
+                                        return transfer->complete();
+                                    }
+                                    else
+                                    {
+                                        LOG_warn << "MAC verification failed";
+                                        transfer->chunkmacs.clear();
+                                        return transfer->failed(API_EKEY);
+                                    }
                                 }
                             }
                         }
@@ -391,13 +422,13 @@ void TransferSlot::doio(MegaClient* client)
                             failure = true;
                             bool changeport = false;
 
-                            if (transfer->type == GET && client->autodownport && !memcmp(tempurl.c_str(), "http:", 5))
+                            if (transfer->type == GET && client->autodownport && !memcmp(tempurls[0].c_str(), "http:", 5))
                             {
                                 LOG_debug << "Automatically changing download port";
                                 client->usealtdownport = !client->usealtdownport;
                                 changeport = true;
                             }
-                            else if (transfer->type == PUT && client->autoupport && !memcmp(tempurl.c_str(), "http:", 5))
+                            else if (transfer->type == PUT && client->autoupport && !memcmp(tempurls[0].c_str(), "http:", 5))
                             {
                                 LOG_debug << "Automatically changing upload port";
                                 client->usealtupport = !client->usealtupport;
@@ -422,13 +453,16 @@ void TransferSlot::doio(MegaClient* client)
 
         if (!failure)
         {
-            if (!reqs[i] || (reqs[i]->status == REQ_READY))
+            if (!reqs[i] || (reqs[i]->status == REQ_READY && !transfer->raiddata[transfer->nextserver()].size()))
             {
-                m_off_t npos = ChunkedHash::chunkceil(transfer->nextpos());
+                int serverid = transfer->nextserver();
+                m_off_t nextpos = transfer->nextserverpos(serverid);
+                m_off_t maxpos = transfer->maxserverpos(serverid);
+                m_off_t npos = ChunkedHash::chunkceil(nextpos);
 
-                if (npos > transfer->size)
+                if (npos > maxpos)
                 {
-                    npos = transfer->size;
+                    npos = maxpos;
                 }
 
                 if (!transfer->size)
@@ -436,29 +470,29 @@ void TransferSlot::doio(MegaClient* client)
                     transfer->pos = 0;
                 }
 
-                if ((npos > transfer->pos) || !transfer->size)
+                if ((npos > nextpos) || !transfer->size)
                 {
                     if (!reqs[i])
                     {
                         reqs[i] = transfer->type == PUT ? (HttpReqXfer*)new HttpReqUL() : (HttpReqXfer*)new HttpReqDL();
                     }
 
-                    string finaltempurl = tempurl;
+                    string finaltempurl = tempurls[serverid];
                     if (transfer->type == GET && client->usealtdownport
-                            && !memcmp(tempurl.c_str(), "http:", 5))
+                            && !memcmp(tempurls[serverid].c_str(), "http:", 5))
                     {
-                        size_t index = tempurl.find("/", 8);
-                        if(index != string::npos && tempurl.find(":", 8) == string::npos)
+                        size_t index = tempurls[serverid].find("/", 8);
+                        if(index != string::npos && tempurls[serverid].find(":", 8) == string::npos)
                         {
                             finaltempurl.insert(index, ":8080");
                         }
                     }
 
                     if (transfer->type == PUT && client->usealtupport
-                            && !memcmp(tempurl.c_str(), "http:", 5))
+                            && !memcmp(tempurls[serverid].c_str(), "http:", 5))
                     {
-                        size_t index = tempurl.find("/", 8);
-                        if(index != string::npos && tempurl.find(":", 8) == string::npos)
+                        size_t index = tempurls[serverid].find("/", 8);
+                        if(index != string::npos && tempurls[serverid].find(":", 8) == string::npos)
                         {
                             finaltempurl.insert(index, ":8080");
                         }
@@ -466,11 +500,12 @@ void TransferSlot::doio(MegaClient* client)
 
                     if (reqs[i]->prepare(fa, finaltempurl.c_str(), &transfer->key,
                                          &transfer->chunkmacs, transfer->ctriv,
-                                         transfer->pos, npos))
+                                         nextpos, npos))
                     {
-                        reqs[i]->pos = ChunkedHash::chunkfloor(transfer->pos);
+                        reqs[i]->pos = ChunkedHash::chunkfloor(nextpos);
                         reqs[i]->status = REQ_PREPARED;
-                        transfer->pos = npos;
+                        reqs[i]->serverid = serverid;
+                        transfer->updateserverpos(serverid, npos);
                     }
                     else
                     {
@@ -513,13 +548,13 @@ void TransferSlot::doio(MegaClient* client)
         failure = true;
         bool changeport = false;
 
-        if (transfer->type == GET && client->autodownport && !memcmp(tempurl.c_str(), "http:", 5))
+        if (transfer->type == GET && client->autodownport && !memcmp(tempurls[0].c_str(), "http:", 5))
         {
             LOG_debug << "Automatically changing download port due to a timeout";
             client->usealtdownport = !client->usealtdownport;
             changeport = true;
         }
-        else if (transfer->type == PUT && client->autoupport && !memcmp(tempurl.c_str(), "http:", 5))
+        else if (transfer->type == PUT && client->autoupport && !memcmp(tempurls[0].c_str(), "http:", 5))
         {
             LOG_debug << "Automatically changing upload port due to a timeout";
             client->usealtupport = !client->usealtupport;

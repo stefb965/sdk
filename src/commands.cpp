@@ -325,13 +325,13 @@ void CommandPutFile::procresult()
         switch (client->json.getnameid())
         {
             case 'p':
-                client->json.storeobject(canceled ? NULL : &tslot->tempurl);
+                client->json.storeobject(canceled ? NULL : &tslot->tempurls[0]);
                 break;
 
             case EOO:
                 if (canceled) return;
 
-                if (tslot->tempurl.size())
+                if (tslot->tempurls[0].size())
                 {
                     tslot->starttime = tslot->lastdata = client->waiter->ds;
                     return tslot->progress();
@@ -458,6 +458,7 @@ CommandGetFile::CommandGetFile(MegaClient *client, TransferSlot* ctslot, byte* k
     cmd("g");
     arg(p ? "n" : "p", (byte*)&h, MegaClient::NODEHANDLE);
     arg("g", 1);
+    arg("v", 2);
 
     if (client->usehttps)
     {
@@ -533,7 +534,18 @@ void CommandGetFile::procresult()
         switch (client->json.getnameid())
         {
             case 'g':
-                client->json.storeobject(tslot ? &tslot->tempurl : NULL);
+                if (!client->json.enterarray())
+                {
+                    client->json.storeobject(tslot ? &tslot->tempurls[0] : NULL);
+                }
+                else
+                {
+                    for (int i = 0; i < 6; i++)
+                    {
+                        client->json.storeobject(tslot ? &tslot->tempurls[i] : NULL);
+                    }
+                    client->json.leavearray();
+                }
                 e = API_OK;
                 break;
 
@@ -678,7 +690,7 @@ void CommandGetFile::procresult()
 
                                         tslot->starttime = tslot->lastdata = client->waiter->ds;
 
-                                        if (tslot->tempurl.size() && s >= 0)
+                                        if (tslot->hastempurl() && s >= 0)
                                         {
                                             return tslot->progress();
                                         }

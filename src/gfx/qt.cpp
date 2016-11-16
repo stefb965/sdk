@@ -382,11 +382,20 @@ bool GfxProcQT::resizebitmap(int rw, int rh, string* jpegout)
     if(result.isNull()) return false;
     jpegout->clear();
 
-    //Remove transparency
-    QImage finalImage(result.size(), QImage::Format_RGB32);
-    finalImage.fill(QColor(Qt::white).rgb());
-    QPainter painter(&finalImage);
-    painter.drawImage(0, 0, result);
+    QImage finalImage;
+    QFileInfo info(imagePath);
+    if (info.suffix().compare(QString::fromUtf8("xpm"), Qt::CaseInsensitive))
+    {
+        //Remove transparency
+        finalImage = QImage(result.size(), QImage::Format_RGB32);
+        finalImage.fill(QColor(Qt::white).rgb());
+        QPainter painter(&finalImage);
+        painter.drawImage(0, 0, result);
+    }
+    else
+    {
+        finalImage = result;
+    }
 
     QByteArray ba;
     QBuffer buffer(&ba);

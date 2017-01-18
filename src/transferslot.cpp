@@ -460,7 +460,15 @@ void TransferSlot::doio(MegaClient* client)
                                 p += reqs[i]->size;
 
                                 LOG_debug << "Writting data asynchronously at " << downloadRequest->dlpos;
-                                asyncIO[i] = fa->asyncfwrite(downloadRequest->buf, downloadRequest->bufpos, downloadRequest->dlpos);
+                                for (int aaa = 0; aaa <= downloadRequest->bufpos; aaa++)
+                                {
+                                    asyncIO[i] = fa->asyncfwrite(downloadRequest->buf, downloadRequest->bufpos, downloadRequest->dlpos);
+                                    if (aaa != downloadRequest->bufpos)
+                                    {
+                                        delete asyncIO[i];
+                                    }
+                                }
+
                                 reqs[i]->status = REQ_ASYNCIO;
                             }
                             else
@@ -809,7 +817,15 @@ void TransferSlot::doio(MegaClient* client)
                                 asyncIO[i] = NULL;
                             }
 
-                            asyncIO[i] = fa->asyncfread(reqs[i]->out, size, (-(int)size) & (SymmCipher::BLOCKSIZE - 1), pos);
+                            for (int aaa = 10000; aaa >= 0; aaa--)
+                            {
+                                asyncIO[i] = fa->asyncfread(reqs[i]->out, size, (-(int)size) & (SymmCipher::BLOCKSIZE - 1), pos + aaa);
+                                if (aaa)
+                                {
+                                    delete asyncIO[i];
+                                }
+                            }
+
                             reqs[i]->status = REQ_ASYNCIO;
                             prepare = false;
                         }

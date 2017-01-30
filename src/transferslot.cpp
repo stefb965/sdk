@@ -795,7 +795,7 @@ void TransferSlot::doio(MegaClient* client)
                         m_off_t pos = transfer->pos;
                         unsigned size = (unsigned)(npos - pos);
 
-                        if (fa->asyncavailable())
+                        if (fa->asyncavailable() && !transfer->inputstream)
                         {
                             if (asyncIO[i])
                             {
@@ -813,10 +813,22 @@ void TransferSlot::doio(MegaClient* client)
                         }
                         else
                         {
-                            if (!fa->fread(reqs[i]->out, size, (-(int)size) & (SymmCipher::BLOCKSIZE - 1), transfer->pos))
+                            bool result;
+                            if (!transfer->inputstream)
+                            {
+                                result = fa->fread(reqs[i]->out, size, (-(int)size) & (SymmCipher::BLOCKSIZE - 1), transfer->pos);
+                            }
+                            else
+                            {
+                                int padding = (unsigned)(-(int)size) & (SymmCipher::BLOCKSIZE - 1);
+                                reqs[i]->out->resize(size + padding);
+                                result = transfer->inputstream->read((byte *)reqs[i]->out->data(), size);
+                            }
+
+                            if (!result)
                             {
                                 LOG_warn << "Error preparing transfer: " << fa->retry;
-                                if (!fa->retry)
+                                if (!fa->retry || transfer->inputstream)
                                 {
                                     return transfer->failed(API_EREAD);
                                 }

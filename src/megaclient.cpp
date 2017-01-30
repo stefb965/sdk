@@ -2484,7 +2484,7 @@ bool MegaClient::dispatch(direction_t d)
         bool openfinished = false;
 
         // verify that a local path was given and start/resume transfer
-        if (nexttransfer->localfilename.size())
+        if (nexttransfer->localfilename.size() || nexttransfer->inputstream)
         {
             if (!nexttransfer->slot)
             {
@@ -2496,7 +2496,7 @@ bool MegaClient::dispatch(direction_t d)
                 ts = nexttransfer->slot;
             }
 
-            if (ts->fa->asyncavailable())
+            if (ts->fa->asyncavailable() && !nexttransfer->inputstream)
             {
                 if (!nexttransfer->asyncopencontext)
                 {
@@ -2533,9 +2533,9 @@ bool MegaClient::dispatch(direction_t d)
             else
             {
                 // try to open file (PUT transfers: open in nonblocking mode)
-                openok = (d == PUT)
+                openok = nexttransfer->inputstream || ((d == PUT)
                         ? ts->fa->fopen(&nexttransfer->localfilename)
-                        : ts->fa->fopen(&nexttransfer->localfilename, false, true);
+                        : ts->fa->fopen(&nexttransfer->localfilename, false, true));
                 openfinished = true;
             }
 
@@ -2549,7 +2549,7 @@ bool MegaClient::dispatch(direction_t d)
                 nexttransfer->pos = 0;
                 nexttransfer->progresscompleted = 0;
 
-                if (d == GET || nexttransfer->cachedtempurl.size())
+                if (d == GET || (nexttransfer->cachedtempurl.size() && !nexttransfer->inputstream))
                 {
                     m_off_t p = 0;
 
@@ -2589,6 +2589,7 @@ bool MegaClient::dispatch(direction_t d)
                 }
                 else
                 {
+                    nexttransfer->cachedtempurl.clear();
                     nexttransfer->chunkmacs.clear();
                 }
 
@@ -2596,10 +2597,11 @@ bool MegaClient::dispatch(direction_t d)
 
                 if (d == PUT)
                 {
-                    nexttransfer->size = ts->fa->size;
+                    nexttransfer->size = nexttransfer->inputstream ?
+                                nexttransfer->inputstream->size() : ts->fa->size;
 
                     // create thumbnail/preview imagery, if applicable (FIXME: do not re-create upon restart)
-                    if (gfx && nexttransfer->localfilename.size() && !nexttransfer->uploadhandle)
+                    if (gfx && !nexttransfer->inputstream && nexttransfer->localfilename.size() && !nexttransfer->uploadhandle)
                     {
                         nexttransfer->uploadhandle = getuploadhandle();
 
@@ -7270,7 +7272,7 @@ void MegaClient::notifynode(Node* n)
 
 void MegaClient::transfercacheadd(Transfer *transfer)
 {
-    if (tctable)
+    if (tctable && !transfer->inputstream)
     {
         LOG_debug << "Caching transfer";
         tctable->put(MegaClient::CACHEDTRANSFER, transfer, &tckey);
@@ -7288,7 +7290,7 @@ void MegaClient::transfercachedel(Transfer *transfer)
 
 void MegaClient::filecacheadd(File *file)
 {
-    if (tctable && !file->syncxfer)
+    if (tctable && !file->syncxfer && !file->inputstream)
     {
         LOG_debug << "Caching file";
         tctable->put(MegaClient::CACHEDFILE, file, &tckey);
@@ -10289,7 +10291,7 @@ bool MegaClient::startxfer(direction_t d, File* f, bool skipdupes)
     {
         if (d == PUT)
         {
-            if (!f->isvalid)    // (sync LocalNodes always have this set)
+            if (!f->isvalid && !f->inputstream)    // (sync LocalNodes always have this set)
             {
                 // missing FileFingerprint for local file - generate
                 FileAccess* fa = fsaccess->newfileaccess();
@@ -10303,19 +10305,17 @@ bool MegaClient::startxfer(direction_t d, File* f, bool skipdupes)
             }
 
             // if we are unable to obtain a valid file FileFingerprint, don't proceed
-            if (!f->isvalid)
+            if (!f->isvalid && !f->inputstream)
             {
                 LOG_err << "Unable to get a fingerprint " << f->name;
                 return false;
             }
         }
-        else
+
+        if (!f->isvalid)
         {
-            if (!f->isvalid)
-            {
-                // no valid fingerprint: use filekey as its replacement
-                memcpy(f->crc, f->filekey, sizeof f->crc);
-            }
+            // no valid fingerprint: use filekey as its replacement
+            memcpy(f->crc, f->filekey, sizeof f->crc);
         }
 
         Transfer* t = NULL;
@@ -10427,6 +10427,7 @@ bool MegaClient::startxfer(direction_t d, File* f, bool skipdupes)
                 t->size = f->size;
             }
 
+            t->inputstream = f->inputstream;
             t->lastaccesstime = time(NULL);
             t->tag = reqtag;
             f->tag = reqtag;

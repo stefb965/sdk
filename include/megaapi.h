@@ -69,6 +69,7 @@ class MegaUserList;
 class MegaContactRequestList;
 class MegaShareList;
 class MegaTransferList;
+class MegaInputStream;
 class MegaApi;
 
 class MegaSemaphore;
@@ -6416,6 +6417,16 @@ class MegaApi
          * @param listener MegaTransferListener to track this transfer
          */
         void startUpload(const char* localPath, MegaNode *parent, MegaTransferListener *listener=NULL);
+
+        /**
+         * @brief Upload a file using from an input stream
+         * @param inputStream Input stream to get the data of the file
+         * @param parent Parent node for the file in MEGA
+         * @param fileName Name for the file in MEGA
+         * @param mtime Modification time for the file in MEGA (in seconds since the epoch)
+         * @param listener MegaTransferListener tp track this request
+         */
+        void startUpload(MegaInputStream *inputStream, MegaNode *parent, const char *fileName, int64_t mtime, MegaTransferListener *listener = NULL);
 
         /**
          * @brief Upload a file or a folder, saving custom app data during the transfer

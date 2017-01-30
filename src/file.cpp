@@ -35,6 +35,7 @@ File::File()
     hforeign = false;
     syncxfer = false;
     temporaryfile = false;
+    inputstream = NULL;
     h = UNDEF;
     tag = 0;
 }
@@ -274,7 +275,10 @@ void File::completed(Transfer* t, LocalNode* l)
         attrs.map['n'] = name;
 
         // store fingerprint
-        t->serializefingerprint(&attrs.map['c']);
+        if (isvalid)
+        {
+            t->serializefingerprint(&attrs.map['c']);
+        }
 
         string tattrstring;
 

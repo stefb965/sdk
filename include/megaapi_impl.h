@@ -429,6 +429,7 @@ class MegaTransferPrivate : public MegaTransfer, public Cachable
         void setLastBytes(char *lastBytes);
         void setLastError(MegaError e);
         void setFolderTransferTag(int tag);
+        void setInputStream(InputStreamAccess *inputStream);
         void setListener(MegaTransferListener *listener);
 
 		virtual int getType() const;
@@ -464,6 +465,7 @@ class MegaTransferPrivate : public MegaTransfer, public Cachable
         virtual MegaError getLastError() const;
         virtual bool isFolderTransfer() const;
         virtual int getFolderTransferTag() const;
+        virtual InputStreamAccess *getInputStream() const;
         virtual void setAppData(const char *data);
         virtual const char* getAppData() const;
         virtual void setState(int state);
@@ -512,6 +514,7 @@ class MegaTransferPrivate : public MegaTransfer, public Cachable
         MegaError lastError;
         int folderTransferTag;
         const char* appData;
+        InputStreamAccess *inputStream;
 };
 
 class MegaTransferDataPrivate : public MegaTransferData
@@ -1127,7 +1130,7 @@ struct MegaFilePut : public MegaFile
 {
     void completed(Transfer* t, LocalNode*);
     void terminated();
-    MegaFilePut(MegaClient *client, string* clocalname, string *filename, handle ch, const char* ctargetuser, int64_t mtime = -1, bool isSourceTemporary = false);
+    MegaFilePut(MegaClient *client, string* clocalname, string *filename, handle ch, const char* ctargetuser, int64_t mtime = -1, bool isSourceTemporary = false, InputStreamAccess *inputstream = NULL);
     ~MegaFilePut() {}
 
     virtual bool serialize(string*);
@@ -1404,7 +1407,8 @@ class MegaApiImpl : public MegaApp
         void startUpload(const char* localPath, MegaNode *parent, MegaTransferListener *listener=NULL);
         void startUpload(const char* localPath, MegaNode *parent, int64_t mtime, MegaTransferListener *listener=NULL);
         void startUpload(const char* localPath, MegaNode* parent, const char* fileName, MegaTransferListener *listener = NULL);
-        void startUpload(const char* localPath, MegaNode* parent, const char* fileName,  int64_t mtime, int folderTransferTag = 0, const char *appData = NULL, bool isSourceFileTemporary = false, MegaTransferListener *listener = NULL);
+        void startUpload(const char* localPath, MegaNode* parent, const char* fileName,  int64_t mtime, int folderTransferTag = 0, const char *appData = NULL, bool isSourceFileTemporary = false, MegaInputStream *inputStream = NULL, MegaTransferListener *listener = NULL);
+        void startUpload(MegaInputStream* inputStream, MegaNode* parent, const char* fileName, int64_t mtime, MegaTransferListener *listener = NULL);
         void startDownload(MegaNode* node, const char* localPath, MegaTransferListener *listener = NULL);
         void startDownload(MegaNode *node, const char* target, long startPos, long endPos, int folderTransferTag, const char *appData, MegaTransferListener *listener);
         void startStreaming(MegaNode* node, m_off_t startPos, m_off_t size, MegaTransferListener *listener);

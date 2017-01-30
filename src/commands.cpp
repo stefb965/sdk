@@ -298,7 +298,9 @@ CommandPutFile::CommandPutFile(MegaClient* client, TransferSlot* ctslot, int ms)
     }
 
     arg("v", 2);
-    arg("s", tslot->fa->size);
+    arg("s", tslot->transfer->inputstream ?
+            tslot->transfer->inputstream->size() :
+            tslot->fa->size);
     arg("ms", ms);
 }
 

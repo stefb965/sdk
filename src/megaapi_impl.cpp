@@ -1297,6 +1297,7 @@ MegaTransferPrivate::MegaTransferPrivate(int type, MegaTransferListener *listene
     this->state = STATE_NONE;
     this->priority = 0;
     this->meanSpeed = 0;
+    this->inputStream = NULL;
 }
 
 MegaTransferPrivate::MegaTransferPrivate(const MegaTransferPrivate *transfer)
@@ -1307,6 +1308,7 @@ MegaTransferPrivate::MegaTransferPrivate(const MegaTransferPrivate *transfer)
     publicNode = NULL;
     lastBytes = NULL;
     appData = NULL;
+    inputStream = NULL;
 
     this->listener = transfer->getListener();
     this->transfer = transfer->getTransfer();
@@ -1499,6 +1501,11 @@ bool MegaTransferPrivate::isFolderTransfer() const
 int MegaTransferPrivate::getFolderTransferTag() const
 {
     return this->folderTransferTag;
+}
+
+InputStreamAccess *MegaTransferPrivate::getInputStream() const
+{
+    return this->inputStream;
 }
 
 void MegaTransferPrivate::setAppData(const char *data)
@@ -1824,6 +1831,11 @@ void MegaTransferPrivate::setFolderTransferTag(int tag)
     this->folderTransferTag = tag;
 }
 
+void MegaTransferPrivate::setInputStream(InputStreamAccess *inputStream)
+{
+    this->inputStream = inputStream;
+}
+
 void MegaTransferPrivate::setListener(MegaTransferListener *listener)
 {
     this->listener = listener;
@@ -1924,6 +1936,7 @@ MegaTransferPrivate::~MegaTransferPrivate()
 	delete [] fileName;
     delete [] appData;
     delete publicNode;
+    delete inputStream;
 }
 
 const char * MegaTransferPrivate::toString() const
@@ -3386,10 +3399,20 @@ void MegaFileGet::terminated()
     delete this;
 }
 
-MegaFilePut::MegaFilePut(MegaClient *, string* clocalname, string *filename, handle ch, const char* ctargetuser, int64_t mtime, bool isSourceTemporary) : MegaFile()
+MegaFilePut::MegaFilePut(MegaClient *, string* clocalname, string *filename, handle ch, const char* ctargetuser, int64_t mtime, bool isSourceTemporary, InputStreamAccess *inputstream) : MegaFile()
 {
     // full local path
-    localname = *clocalname;
+    if(clocalname)
+    {
+        localname = *clocalname;
+    }
+
+    if (inputstream)
+    {
+        this->inputstream = inputstream;
+        this->localname.clear();
+        this->size = inputstream->size();
+    }
 
     // target parent node
     h = ch;
@@ -5593,7 +5616,8 @@ MegaTransferList *MegaApiImpl::getChildTransfers(int transferTag)
     return result;
 }
 
-void MegaApiImpl::startUpload(const char *localPath, MegaNode *parent, const char *fileName, int64_t mtime, int folderTransferTag, const char *appData, bool isSourceFileTemporary, MegaTransferListener *listener)
+void MegaApiImpl::startUpload(const char *localPath, MegaNode *parent, const char *fileName, int64_t mtime, int folderTransferTag,
+                              const char *appData, bool isSourceFileTemporary,  MegaInputStream *inputStream, MegaTransferListener *listener)
 {
     MegaTransferPrivate* transfer = new MegaTransferPrivate(MegaTransfer::TYPE_UPLOAD, listener);
     if(localPath)
@@ -5627,18 +5651,28 @@ void MegaApiImpl::startUpload(const char *localPath, MegaNode *parent, const cha
         transfer->setFolderTransferTag(folderTransferTag);
     }
 
+    if (inputStream)
+    {
+        transfer->setInputStream(new ExternalInputStream(inputStream));
+    }
+
 	transferQueue.push(transfer);
     waiter->notify();
 }
 
+void MegaApiImpl::startUpload(MegaInputStream *inputStream, MegaNode *parent, const char *fileName, int64_t mtime, MegaTransferListener *listener)
+{
+    return startUpload(NULL, parent, fileName, mtime, 0, NULL, false, inputStream, listener);
+}
+
 void MegaApiImpl::startUpload(const char* localPath, MegaNode* parent, MegaTransferListener *listener)
-{ return startUpload(localPath, parent, (const char *)NULL, -1, 0, NULL, false, listener); }
+{ return startUpload(localPath, parent, (const char *)NULL, -1, 0, NULL, false, NULL, listener); }
 
 void MegaApiImpl::startUpload(const char *localPath, MegaNode *parent, int64_t mtime, MegaTransferListener *listener)
-{ return startUpload(localPath, parent, (const char *)NULL, mtime, 0, NULL, false, listener); }
+{ return startUpload(localPath, parent, (const char *)NULL, mtime, 0, NULL, false, NULL, listener); }
 
 void MegaApiImpl::startUpload(const char* localPath, MegaNode* parent, const char* fileName, MegaTransferListener *listener)
-{ return startUpload(localPath, parent, fileName, -1, 0, NULL, false, listener); }
+{ return startUpload(localPath, parent, fileName, -1, 0, NULL, false, NULL, listener); }
 
 void MegaApiImpl::startDownload(MegaNode *node, const char* localPath, long /*startPos*/, long /*endPos*/, int folderTransferTag, const char *appData, MegaTransferListener *listener)
 {
@@ -5753,7 +5787,7 @@ void MegaApiImpl::retryTransfer(MegaTransfer *transfer, MegaTransferListener *li
     {
         MegaNode *parent = getNodeByHandle(t->getParentHandle());
         startUpload(t->getPath(), parent, t->getFileName(), t->getTime(), 0,
-                          t->getAppData(), t->isSourceFileTemporary(), listener);
+                          t->getAppData(), t->isSourceFileTemporary(), NULL, listener);
         delete parent;
     }
 }
@@ -11589,57 +11623,63 @@ void MegaApiImpl::sendPendingTransfers()
                 int64_t mtime = transfer->getTime();
                 bool isSourceTemporary = transfer->isSourceFileTemporary();
                 Node *parent = client->nodebyhandle(transfer->getParentHandle());
+                InputStreamAccess *inputStream = transfer->getInputStream();
 
-                if (!localPath || !parent || parent->type == FILENODE || !fileName || !(*fileName))
+                if ((!localPath && !inputStream) || !parent || parent->type == FILENODE || !fileName || !(*fileName))
                 {
                     e = API_EARGS;
                     break;
                 }
 
-                string tmpString = localPath;
                 string wLocalPath;
-                client->fsaccess->path2local(&tmpString, &wLocalPath);
+                nodetype_t type = FILENODE;
 
-                FileAccess *fa = fsAccess->newfileaccess();
-                if (!fa->fopen(&wLocalPath, true, false))
+                if (localPath)
                 {
-                    e = API_EREAD;
-                    break;
-                }
+                    string tmpString = localPath;
+                    client->fsaccess->path2local(&tmpString, &wLocalPath);
 
-                nodetype_t type = fa->type;
-                Node *previousNode = client->childnodebyname(parent, fileName);
-                if (previousNode && previousNode->type == type && type == FILENODE)
-                {
-                    FileFingerprint fp;
-                    fp.genfingerprint(fa);
-                    if (fp == *((FileFingerprint *)previousNode))
+                    FileAccess *fa = fsAccess->newfileaccess();
+                    if (!fa->fopen(&wLocalPath, true, false))
                     {
-                        transfer->setState(MegaTransfer::STATE_QUEUED);
-                        transferMap[nextTag] = transfer;
-                        transfer->setTag(nextTag);
-                        transfer->setTotalBytes(fa->size);
-                        fireOnTransferStart(transfer);
-                        transfer->setNodeHandle(previousNode->nodehandle);
-                        transfer->setDeltaSize(fa->size);
-                        transfer->setSpeed(0);
-                        transfer->setMeanSpeed(0);
-                        transfer->setStartTime(Waiter::ds);
-                        transfer->setUpdateTime(Waiter::ds);
-                        transfer->setState(MegaTransfer::STATE_COMPLETED);
-                        fireOnTransferFinish(transfer, MegaError(API_OK));
-                        delete fa;
+                        e = API_EREAD;
                         break;
                     }
-                }
 
-                delete fa;
+                    type = fa->type;
+                    Node *previousNode = client->childnodebyname(parent, fileName);
+                    if (previousNode && previousNode->type == type && type == FILENODE)
+                    {
+                        FileFingerprint fp;
+                        fp.genfingerprint(fa);
+                        if (fp == *((FileFingerprint *)previousNode))
+                        {
+                            transfer->setState(MegaTransfer::STATE_QUEUED);
+                            transferMap[nextTag] = transfer;
+                            transfer->setTag(nextTag);
+                            transfer->setTotalBytes(fa->size);
+                            fireOnTransferStart(transfer);
+                            transfer->setNodeHandle(previousNode->nodehandle);
+                            transfer->setDeltaSize(fa->size);
+                            transfer->setSpeed(0);
+                            transfer->setMeanSpeed(0);
+                            transfer->setStartTime(Waiter::ds);
+                            transfer->setUpdateTime(Waiter::ds);
+                            transfer->setState(MegaTransfer::STATE_COMPLETED);
+                            fireOnTransferFinish(transfer, MegaError(API_OK));
+                            delete fa;
+                            break;
+                        }
+                    }
+
+                    delete fa;
+                }
 
                 if (type == FILENODE)
                 {
                     currentTransfer = transfer;                    
                     string wFileName = fileName;
-                    MegaFilePut *f = new MegaFilePut(client, &wLocalPath, &wFileName, transfer->getParentHandle(), "", mtime, isSourceTemporary);
+                    MegaFilePut *f = new MegaFilePut(client, &wLocalPath, &wFileName, transfer->getParentHandle(), "", mtime, isSourceTemporary, inputStream);
                     f->setTransfer(transfer);
                     bool started = client->startxfer(PUT, f, true);
                     if (!started)
@@ -15364,7 +15404,7 @@ void MegaFolderUploadController::onFolderAvailable(MegaHandle handle)
                         {
                             string utf8path;
                             client->fsaccess->local2path(&localPath, &utf8path);
-                            megaApi->startUpload(utf8path.c_str(), parent, (const char *)NULL, -1, tag, NULL, false, this);
+                            megaApi->startUpload(utf8path.c_str(), parent, (const char *)NULL, -1, tag, NULL, false, NULL, this);
                         }
                         else
                         {

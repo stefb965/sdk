@@ -50,6 +50,7 @@ Transfer::Transfer(MegaClient* cclient, direction_t ctype)
 
     priority = 0;
     state = TRANSFERSTATE_NONE;
+    inputstream = NULL;
 
     faputcompletion_it = client->faputcompletion.end();
     transfers_it = client->transfers[type].end();
@@ -373,12 +374,16 @@ void Transfer::failed(error e, dstime timeleft)
     client->looprequested = true;
     client->app->transfer_failed(this, e, timeleft);
 
-    for (file_list::iterator it = files.begin(); it != files.end(); it++)
+
+    if (!inputstream)
     {
-        if ((*it)->failed(e))
+        for (file_list::iterator it = files.begin(); it != files.end(); it++)
         {
-            defer = true;
-            break;
+            if ((*it)->failed(e))
+            {
+                defer = true;
+                break;
+            }
         }
     }
 
@@ -796,20 +801,23 @@ void Transfer::complete()
     {
         LOG_debug << "Upload complete: " << (files.size() ? files.front()->name : "NO_FILES") << " " << files.size();
 
-        // files must not change during a PUT transfer
-        if (slot->fa->asyncavailable())
+        if (!inputstream)
         {
-            delete slot->fa;
-            slot->fa = client->fsaccess->newfileaccess();
-            if (!slot->fa->fopen(&localfilename))
+            // files must not change during a PUT transfer
+            if (slot->fa->asyncavailable())
+            {
+                delete slot->fa;
+                slot->fa = client->fsaccess->newfileaccess();
+                if (!slot->fa->fopen(&localfilename))
+                {
+                    return failed(API_EREAD);
+                }
+            }
+
+            if (genfingerprint(slot->fa, true))
             {
                 return failed(API_EREAD);
             }
-        }
-
-        if (genfingerprint(slot->fa, true))
-        {
-            return failed(API_EREAD);
         }
 
         // if this transfer is put on hold, do not complete

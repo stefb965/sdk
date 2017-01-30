@@ -93,6 +93,9 @@ struct MEGA_API File: public FileFingerprint
     Transfer* transfer;
     file_list::iterator file_it;
 
+    // input stream to access the data of the file
+    InputStreamAccess *inputstream;
+
     File();
     virtual ~File();
 

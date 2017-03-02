@@ -3495,7 +3495,7 @@ void MegaFilePut::completed(Transfer* t, LocalNode*)
     if(n)
     {
         Node *tn = t->client->nodebyhandle(destinationForMove);
-        if (!tn)
+        if (!tn || tn->type == FILENODE)
         {
             tn = t->client->nodebyhandle(t->client->rootnodes[RUBBISHNODE - ROOTNODE]);
         }

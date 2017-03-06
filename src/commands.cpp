@@ -881,6 +881,11 @@ CommandPutNodes::CommandPutNodes(MegaClient* client, handle th,
             arg("p", (byte*)&nn[i].parenthandle, MegaClient::NODEHANDLE);
         }
 
+        if (!ISUNDEF(nn[i].oldversionhandle))
+        {
+            arg("r", (byte*)&nn[i].oldversionhandle, MegaClient::NODEHANDLE);
+        }
+
         arg("t", nn[i].type);
         arg("a", (byte*)nn[i].attrstring->data(), nn[i].attrstring->size());
 

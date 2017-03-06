@@ -5474,7 +5474,7 @@ int MegaClient::readnodes(JSON* j, int notify, putsource_t source, NewNode* nn, 
 
     while (j->enterobject())
     {
-        handle h = UNDEF, ph = UNDEF;
+        handle h = UNDEF, ph = UNDEF, ovh = UNDEF;
         handle u = 0, su = UNDEF;
         nodetype_t t = TYPE_UNKNOWN;
         const char* a = NULL;
@@ -5493,6 +5493,11 @@ int MegaClient::readnodes(JSON* j, int notify, putsource_t source, NewNode* nn, 
             {
                 case 'h':   // new node: handle
                     h = j->gethandle();
+                    break;
+
+                case MAKENAMEID2('o', 'v'):  // old version
+                    ovh = j->gethandle(); // TODO: Process this value
+                    LOG_debug << "Old version handle received: " << LOG_NODEHANDLE(ovh);
                     break;
 
                 case 'p':   // parent node
@@ -10022,10 +10027,10 @@ void MegaClient::syncupdate()
 
                 if (n)
                 {
-                    // overwriting an existing remote node? send it to SyncDebris.
+                    // overwriting an existing remote node? tag it as the previous version
                     if (l->node && l->node->parent && l->node->parent->localnode)
                     {
-                        movetosyncdebris(l->node, l->sync->inshare);
+                        nnp->oldversionhandle = l->node->nodehandle;
                     }
 
                     // this is a file - copy, use original key & attributes

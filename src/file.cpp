@@ -295,6 +295,12 @@ void File::completed(Transfer* t, LocalNode* l)
         {
             handle th = h;
 
+            // tag the previous version in the synced folder (if any)
+            if (l && l->node && l->node->parent && l->node->parent->localnode)
+            {
+                newnode->oldversionhandle = l->node->nodehandle;
+            }
+
             // inaccessible target folder - use / instead
             if (!t->client->nodebyhandle(th))
             {

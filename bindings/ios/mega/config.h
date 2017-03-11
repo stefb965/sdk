@@ -7,9 +7,6 @@
 /* Define to 1 if you have the <arpa/inet.h> header file. */
 #define HAVE_ARPA_INET_H 1
 
-/* Define to 1 if you have the `clock_gettime' function. */
-#define HAVE_CLOCK_GETTIME 1
-
 /* Define to 1 if you have the <cryptopp/cryptlib.h> header file. */
 #define HAVE_CRYPTOPP_CRYPTLIB_H 1
 
@@ -111,15 +108,6 @@
    */
 #define LT_OBJDIR ".libs/"
 
-/* MEGA SDK major version. */
-#define MEGA_MAJOR_VERSION 2
-
-/* MEGA SDK micro version. */
-#define MEGA_MICRO_VERSION 0
-
-/* MEGA SDK minor version. */
-#define MEGA_MINOR_VERSION 5
-
 /* Name of package */
 #define PACKAGE "libmega"
 
@@ -129,17 +117,11 @@
 /* Define to the full name of this package. */
 #define PACKAGE_NAME "libmega"
 
-/* Define to the full name and version of this package. */
-#define PACKAGE_STRING "libmega 0.2.3"
-
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "libmega"
 
 /* Define to the home page for this package. */
 #define PACKAGE_URL ""
-
-/* Define to the version of this package. */
-#define PACKAGE_VERSION "0.2.3"
 
 /* The size of `uint64_t', as computed by sizeof. */
 #define SIZEOF_UINT64_T 8
@@ -158,6 +140,12 @@
 #define USE_PTHREAD 1
 
 #define USE_ARES 1
+
+#define USE_IOS 1
+
+#define HAVE_LIBUV 1
+
+#define ENABLE_CHAT 1
 
 /* Define to use Berkeley DB */
 #define USE_DB 0

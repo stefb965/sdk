@@ -23,6 +23,8 @@
 
 #ifndef THREAD_CLASS
 #define THREAD_CLASS Win32Thread
+#define MUTEX_CLASS Win32Mutex
+#define SEMAPHORE_CLASS Win32Semaphore
 
 #include "mega/thread.h"
 
@@ -35,18 +37,21 @@ public:
     virtual void join();
     virtual ~Win32Thread();
 
-	void *(*start_routine)(void*);
+    void *(*start_routine)(void*);
     void *pointer;
+
+    static uint64_t currentThreadId();
 
 protected:
     static DWORD WINAPI run(LPVOID lpParameter);
-	HANDLE hThread;
+    HANDLE hThread;
 };
 
 class Win32Mutex : public Mutex
 {
 public:
     Win32Mutex();
+    Win32Mutex(bool recursive);
     virtual void init(bool recursive);
     virtual void lock();
     virtual void unlock();
@@ -54,6 +59,19 @@ public:
 
 protected:
     CRITICAL_SECTION mutex;
+};
+
+class Win32Semaphore : public Semaphore
+{
+public:
+    Win32Semaphore();
+    virtual void release();
+    virtual void wait();
+    virtual int timedwait(int milliseconds);
+    virtual ~Win32Semaphore();
+
+protected:
+    HANDLE semaphore;
 };
 
 } // namespace

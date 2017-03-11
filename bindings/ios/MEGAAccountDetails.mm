@@ -77,6 +77,36 @@ using namespace mega;
     return (MEGAAccountType) (self.accountDetails ? self.accountDetails->getProLevel() : 0);
 }
 
+- (NSInteger)proExpiration {
+    return self.accountDetails ? self.accountDetails->getProExpiration() : 0;
+}
+
+- (MEGASubscriptionStatus)subscriptionStatus {
+    return (MEGASubscriptionStatus) (self.accountDetails ? self.accountDetails->getSubscriptionStatus() : 0);
+}
+
+- (NSInteger)subscriptionRenewTime {
+    return self.accountDetails ? self.accountDetails->getSubscriptionRenewTime() : 0;
+}
+
+- (NSString *)subscriptionMethod {
+    const char *val = self.accountDetails->getSubscriptionMethod();
+    if (!val) return nil;
+    
+    NSString *ret = [[NSString alloc] initWithUTF8String:val];
+    
+    delete [] val;
+    return ret;    
+}
+
+- (NSString *)subscriptionCycle {
+    return self.accountDetails ? [[NSString alloc] initWithUTF8String:self.accountDetails->getSubscriptionCycle()] : nil;
+}
+
+- (NSInteger)numberUsageItems {
+    return self.accountDetails ? self.accountDetails->getNumUsageItems() : 0;
+}
+
 - (NSNumber *)storageUsedForHandle:(uint64_t)handle {
     return self.accountDetails ? [[NSNumber alloc] initWithLongLong:self.accountDetails->getStorageUsed(handle)] : nil;
 }

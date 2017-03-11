@@ -53,7 +53,8 @@ struct MEGA_API NodeCore
 // new node for putnodes()
 struct MEGA_API NewNode : public NodeCore
 {
-    static const int UPLOADTOKENLEN = 27;
+    static const int OLDUPLOADTOKENLEN = 27;
+    static const int UPLOADTOKENLEN = 36;
 
     newnodesource_t source;
 
@@ -75,8 +76,25 @@ struct MEGA_API NewNode : public NodeCore
     }
 };
 
+struct MEGA_API PublicLink
+{
+    handle ph;
+    m_time_t ets;
+    bool takendown;
+
+    PublicLink(handle ph, m_time_t ets, bool takendown)
+    {
+        this->ph = ph;
+        this->ets = ets;
+        this->takendown = takendown;
+    }
+
+    PublicLink(PublicLink *plink);
+    bool isExpired();
+};
+
 // filesystem node
-struct MEGA_API Node : public NodeCore, Cachable, FileFingerprint
+struct MEGA_API Node : public NodeCore, FileFingerprint
 {
     MegaClient* client;
 
@@ -122,6 +140,9 @@ struct MEGA_API Node : public NodeCore, Cachable, FileFingerprint
     // outbound shares by user
     share_map *outshares;
 
+    // outbound pending shares
+    share_map *pendingshares;
+
     // incoming/outgoing share key
     SymmCipher* sharekey;
 
@@ -139,7 +160,9 @@ struct MEGA_API Node : public NodeCore, Cachable, FileFingerprint
         bool fileattrstring : 1;
         bool inshare : 1;
         bool outshares : 1;
+        bool pendingshares : 1;
         bool parent : 1;
+        bool publiclink : 1;
     } changed;
     
     void setkey(const byte* = NULL);
@@ -184,6 +207,11 @@ struct MEGA_API Node : public NodeCore, Cachable, FileFingerprint
     // check if node is below this node
     bool isbelow(Node*) const;
 
+    // handle of public link for the node
+    PublicLink *plink;
+
+    void setpubliclink(handle, m_time_t, bool);
+
     bool serialize(string*);
     static Node* unserialize(MegaClient*, string*, node_vector*);
 
@@ -192,7 +220,7 @@ struct MEGA_API Node : public NodeCore, Cachable, FileFingerprint
 };
 
 #ifdef ENABLE_SYNC
-struct MEGA_API LocalNode : public File, Cachable
+struct MEGA_API LocalNode : public File
 {
     class Sync* sync;
 
@@ -252,6 +280,9 @@ struct MEGA_API LocalNode : public File, Cachable
     // update sync state all the way to the root node
     void treestate(treestate_t = TREESTATE_NONE);
 
+    // check the current state (only useful for folders)
+    treestate_t checkstate();
+
     // timer to delay upload start
     dstime nagleds;
     void bumpnagleds();
@@ -266,8 +297,10 @@ struct MEGA_API LocalNode : public File, Cachable
     // return child node by name
     LocalNode* childbyname(string*);
 
+#ifdef USE_INOTIFY
     // node-specific DirNotify tag
     handle dirnotifytag;
+#endif
 
     void prepare();
     void completed(Transfer*, LocalNode*);

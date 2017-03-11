@@ -43,7 +43,8 @@ typedef NS_ENUM(NSInteger, MEGAErrorType) {
     MEGAErrorTypeApiETooManyConnections = -19,     // too many connections on this resource
     MEGAErrorTypeApiEWrite = -20,                  // file could not be written to
     MEGAErrorTypeApiERead = -21,                   // file could not be read from
-    MEGAErrorTypeApiEAppKey = -22                  // invalid or missing application key
+    MEGAErrorTypeApiEAppKey = -22,                 // invalid or missing application key
+    MEGAErrorTypeApiESSL = -23                     // invalid SSL key
 };
 
 /**
@@ -60,6 +61,17 @@ typedef NS_ENUM(NSInteger, MEGAErrorType) {
  * @brief Readable description of the error.
  */
 @property (readonly, nonatomic) NSString *name;
+
+/**
+ * @brief Value associated with the error
+ *
+ * Currently, this value is only useful when it is related to an MEGAErrorTypeApiEOverQuota
+ * error related to a transfer. In that case, it's the number of seconds until
+ * the more bandwidth will be available for the account.
+ *
+ * In any other case, this value will be 0
+ */
+@property (readonly, nonatomic) long long value;
 
 /**
  * @brief Creates a copy of this MEGAError object.

@@ -34,6 +34,9 @@ class MEGA_API Base64
 public:
     static int btoa(const byte*, int, char*);
     static int atob(const char*, byte*, int);
+
+    static void itoa(int64_t, string *);
+    static int64_t atoi(string *);
 };
 
 // lowercase base32 encoding
@@ -46,6 +49,19 @@ public:
     static int btoa(const byte*, int, char*);
     static int atob(const char*, byte*, int);
 };
+
+class MEGA_API URLCodec
+{
+    static bool ishexdigit(char c);
+    static bool issafe(char c);
+    static char hexval(char c);
+
+
+public:
+    static void escape(string* plain, string* escaped);
+    static void unescape(string* escaped, string* plain);
+};
+
 } // namespace
 
 #endif

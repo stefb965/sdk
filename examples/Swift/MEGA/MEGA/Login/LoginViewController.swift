@@ -29,7 +29,7 @@ class LoginViewController: UIViewController, MEGARequestDelegate {
     @IBOutlet weak var loginButton: UIButton!
     @IBOutlet weak var informationLabel: UILabel!
     
-    let megaapi : MEGASdk! = (UIApplication.sharedApplication().delegate as AppDelegate).megaapi
+    let megaapi : MEGASdk! = (UIApplication.sharedApplication().delegate as! AppDelegate).megaapi
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -54,7 +54,7 @@ class LoginViewController: UIViewController, MEGARequestDelegate {
     // MARK: - Validate methods
     
     func validateForm() -> Bool {
-        if !validateEmail(emailTextField.text) {
+        if !validateEmail(emailTextField.text!) {
             let alertController = UIAlertController(title: "Invalid email", message: "Enter a valid email", preferredStyle: UIAlertControllerStyle.Alert)
             alertController.addAction(UIAlertAction(title: "Dismiss", style: UIAlertActionStyle.Default,handler: nil))
             self.presentViewController(alertController, animated: true, completion: nil)
@@ -62,7 +62,7 @@ class LoginViewController: UIViewController, MEGARequestDelegate {
             emailTextField.becomeFirstResponder()
             
             return false
-        } else if !validatePassword(passwordTextField.text) {
+        } else if !validatePassword(passwordTextField.text!) {
             let alertController = UIAlertController(title: "Invalid password", message: "Enter a valid password", preferredStyle: UIAlertControllerStyle.Alert)
             alertController.addAction(UIAlertAction(title: "Dismiss", style: UIAlertActionStyle.Default,handler: nil))
             self.presentViewController(alertController, animated: true, completion: nil)
@@ -81,7 +81,7 @@ class LoginViewController: UIViewController, MEGARequestDelegate {
     func validateEmail(email : String) -> Bool {
         let emailRegex = "(?:[a-z0-9!#$%\\&'*+/=?\\^_`{|}~-]+(?:\\.[a-z0-9!#$%\\&'*+/=?\\^_`{|}~-]+)*|\"(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21\\x23-\\x5b\\x5d-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])*\")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?|[a-z0-9-]*[a-z0-9]:(?:[\\x01-\\x08\\x0b\\x0c\\x0e-\\x1f\\x21-\\x5a\\x53-\\x7f]|\\\\[\\x01-\\x09\\x0b\\x0c\\x0e-\\x7f])+)\\])"
         
-        let resultPredicate : NSPredicate = NSPredicate(format: "SELF MATCHES[c] %@", emailRegex)!
+        let resultPredicate : NSPredicate = NSPredicate(format: "SELF MATCHES[c] %@", emailRegex)
         
         return resultPredicate.evaluateWithObject(email)
     }
@@ -136,7 +136,7 @@ class LoginViewController: UIViewController, MEGARequestDelegate {
     
     func onRequestUpdate(api: MEGASdk!, request: MEGARequest!) {
         if request.type == MEGARequestType.FetchNodes {
-            var progress = request.transferredBytes.floatValue / request.totalBytes.floatValue
+            let progress = request.transferredBytes.floatValue / request.totalBytes.floatValue
             if progress > 0 && progress < 0.99 {
                 informationLabel.text = "Fectching nodes"
                 loginProgressView.setProgress(progress, animated: true)

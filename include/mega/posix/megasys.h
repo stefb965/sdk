@@ -40,10 +40,12 @@
 #include <string>   // the MEGA SDK assumes writable, contiguous string::data()
 #include <sstream>
 #include <map>
+#include <deque>
 #include <set>
 #include <iterator>
 #include <queue>
 #include <list>
+#include <functional>
 
 #ifdef HAVE_STDDEF_H
     #include <stddef.h>
@@ -74,6 +76,8 @@
 
 #ifdef HAVE_GLOB_H
     #include <glob.h>
+#else
+    #include "mega/mega_glob.h"
 #endif
 
 #ifdef HAVE_DIRENT_H

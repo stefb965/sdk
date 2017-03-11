@@ -31,7 +31,9 @@ use_local=0
 use_dynamic=0
 disable_freeimage=0
 disable_ssl=0
+disable_zlib=0
 download_only=0
+only_build_dependencies=0
 enable_megaapi=0
 make_opts=""
 config_opts=""
@@ -39,17 +41,25 @@ no_examples=""
 configure_only=0
 disable_posix_threads=""
 enable_sodium=0
+enable_cares=0
+enable_curl=0
+enable_libuv=0
 android_build=0
+enable_cryptopp=0
 
 on_exit_error() {
     echo "ERROR! Please check log files. Exiting.."
 }
 
 on_exit_ok() {
-    if [ $configure_only -eq 0 ]; then
-        echo "Successfully compiled MEGA SDK!"
-    else
+    if [ $configure_only -eq 1 ]; then
         echo "Successfully configured MEGA SDK!"
+    elif [ $download_only -eq 1 ]; then
+        echo "Successfully downloaded MEGA SDK dependencies!"
+    elif [ $only_build_dependencies -eq 1 ]; then
+        echo "Successfully built MEGA SDK dependencies!"
+    else
+        echo "Successfully compiled MEGA SDK!"
     fi
 }
 
@@ -67,7 +77,7 @@ print_distro_help()
     type apt-get >/dev/null 2>&1
     local exit_code=$?
     if [ $exit_code -eq 0 ]; then
-        echo "Please execute the following command:  sudo apt-get install gcc c++ libtool-bin unzip autoconf make wget"
+        echo "Please execute the following command:  sudo apt-get install gcc c++ libtool-bin unzip autoconf m4 make wget"
         echo " (or 'libtool' on older Debian / Ubuntu distro versions)"
         return
     fi
@@ -96,6 +106,7 @@ package_download() {
     local name=$1
     local url=$2
     local file=$local_dir/$3
+    local md5sum=$4
 
     if [ $use_local -eq 1 ]; then
         echo "Using local file for $name"
@@ -108,7 +119,35 @@ package_download() {
         rm -f $file || true
     fi
 
-    wget --no-check-certificate -c $url -O $file --progress=bar:force || exit 1
+    # use packages previously downloaded in /tmp/megasdkbuild folder
+    # if not present download from URL specified
+    # if wget fail, try curl
+    mkdir -p /tmp/megasdkbuild/
+    
+#    cp /srv/dependencies_manually_downloaded/$3 $file 2>/dev/null || \
+
+    cp /tmp/megasdkbuild/$3 $file || \
+    wget --no-check-certificate -c $url -O $file --progress=bar:force -t 2 -T 30 || \
+    curl -k $url > $file || exit 1
+    
+    echo "Checking MD5SUM for $file"
+    if ! echo $md5sum \*$file | md5sum -c - ; then
+        echo "Downloading $3 again"
+        #rm /tmp/megasdkbuild/$3
+        rm $file #this prevents unexpected "The file is already fully retrieved; nothing to do."
+        wget --no-check-certificate -c $url -O $file --progress=bar:force -t 2 -T 30 || \
+        curl -k $url > $file || exit 1
+        
+        echo "Checking (again) MD5SUM for $file"
+        if ! echo $md5sum \*$file | md5sum -c - ; then
+            echo "Aborting execution due to incorrect MD5SUM for $file. Expected: $md5sum. Calculated:"
+            md5sum $file
+            exit 1
+        fi
+    fi
+    
+    #copy to tmp download folder for next constructions
+    cp $file /tmp/megasdkbuild/$3
 }
 
 package_extract() {
@@ -147,11 +186,16 @@ package_configure() {
 
     local conf_f1="./config"
     local conf_f2="./configure"
+    local autogen="./autogen.sh"
 
     echo "Configuring $name"
 
     local cwd=$(pwd)
     cd $dir || exit 1
+
+    if [ -f $autogen ]; then
+        $autogen
+    fi
 
     if [ -f $conf_f1 ]; then
         $conf_f1 --prefix=$install_dir $params &> ../$name.conf.log || exit 1
@@ -181,6 +225,7 @@ package_build() {
     local cwd=$(pwd)
     cd $dir
 
+    echo make $make_opts $target
     make $make_opts $target &> ../$name.build.log
 
     local exit_code=$?
@@ -206,6 +251,7 @@ package_install() {
 
     local cwd=$(pwd)
     cd $dir
+
     make install $target &> ../$name.install.log
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then
@@ -226,14 +272,16 @@ openssl_pkg() {
     local build_dir=$1
     local install_dir=$2
     local name="OpenSSL"
-    local openssl_ver="1.0.2a"
+    local openssl_ver="1.0.2h"
     local openssl_url="https://www.openssl.org/source/openssl-$openssl_ver.tar.gz"
+    local openssl_md5="9392e65072ce4b614c1392eefc1f23d0"
+
     local openssl_file="openssl-$openssl_ver.tar.gz"
     local openssl_dir="openssl-$openssl_ver"
     local openssl_params="--openssldir=$install_dir no-shared shared"
     local loc_make_opts=$make_opts
 
-    package_download $name $openssl_url $openssl_file
+    package_download $name $openssl_url $openssl_file $openssl_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
@@ -278,36 +326,38 @@ cryptopp_pkg() {
     local build_dir=$1
     local install_dir=$2
     local name="Crypto++"
-    local cryptopp_ver="562"
+    local cryptopp_ver="563"
     local cryptopp_url="http://www.cryptopp.com/cryptopp$cryptopp_ver.zip"
+    local cryptopp_md5="3c5b70e2ec98b7a24988734446242d07"
     local cryptopp_file="cryptopp$cryptopp_ver.zip"
     local cryptopp_dir="cryptopp$cryptopp_ver"
-    local cryptopp_mobile_url="http://www.cryptopp.com/w/images/a/a0/Cryptopp-mobile.zip"
-    local cryptopp_mobile_file="Cryptopp-mobile.zip"
 
-    package_download $name $cryptopp_url $cryptopp_file
-    if [ $android_build -eq 1 ]; then
-        package_download $name $cryptopp_mobile_url $cryptopp_mobile_file
-    fi
+    package_download $name $cryptopp_url $cryptopp_file $cryptopp_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
 
     package_extract $name $cryptopp_file $cryptopp_dir
+
+    #modify Makefile so that it does not use specific cpu architecture optimizations
+    sed "s#CXXFLAGS += -march=native#CXXFLAGS += #g" -i $cryptopp_dir/GNUmakefile
+    
     if [ $android_build -eq 1 ]; then
-        local file=$local_dir/$cryptopp_mobile_file
-        unzip -o $file -d $cryptopp_dir || exit 1
-    fi
-    package_build $name $cryptopp_dir static
-    package_install $name $cryptopp_dir $install_dir
+        package_build $name $cryptopp_dir "static -f GNUmakefile-cross"
+        package_install $name $cryptopp_dir $install_dir "-f GNUmakefile-cross"
+    else
+        package_build $name $cryptopp_dir static
+        package_install $name $cryptopp_dir $install_dir
+   fi
 }
 
 sodium_pkg() {
     local build_dir=$1
     local install_dir=$2
     local name="Sodium"
-    local sodium_ver="1.0.1"
+    local sodium_ver="1.0.8"
     local sodium_url="https://download.libsodium.org/libsodium/releases/libsodium-$sodium_ver.tar.gz"
+    local sodium_md5="0a66b86fd3aab3fe4c858edcd2772760"
     local sodium_file="sodium-$sodium_ver.tar.gz"
     local sodium_dir="libsodium-$sodium_ver"
     if [ $use_dynamic -eq 1 ]; then
@@ -316,7 +366,7 @@ sodium_pkg() {
         local sodium_params="--disable-shared --enable-static"
     fi
 
-    package_download $name $sodium_url $sodium_file
+    package_download $name $sodium_url $sodium_file $sodium_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
@@ -327,12 +377,48 @@ sodium_pkg() {
     package_install $name $sodium_dir $install_dir
 }
 
+libuv_pkg() {
+    local build_dir=$1
+    local install_dir=$2
+    local name="libuv"
+    local libuv_ver="v1.8.0"
+    local libuv_url="http://dist.libuv.org/dist/$libuv_ver/libuv-$libuv_ver.tar.gz"
+    local libuv_md5="f4229c4360625e973ae933cb92e1faf7"
+    local libuv_file="libuv-$libuv_ver.tar.gz"
+    local libuv_dir="libuv-$libuv_ver"
+    if [ $use_dynamic -eq 1 ]; then
+        local libuv_params="--enable-shared"
+    else
+        local libuv_params="--disable-shared --enable-static"
+    fi
+
+    package_download $name $libuv_url $libuv_file $libuv_md5
+    if [ $download_only -eq 1 ]; then
+        return
+    fi
+
+    package_extract $name $libuv_file $libuv_dir
+
+    # linking with static library requires -fPIC
+    if [ $use_dynamic -eq 0 ]; then
+        export CFLAGS="-fPIC"
+    fi
+    package_configure $name $libuv_dir $install_dir "$libuv_params"
+    if [ $use_dynamic -eq 0 ]; then
+        unset CFLAGS
+    fi
+
+    package_build $name $libuv_dir
+    package_install $name $libuv_dir $install_dir
+}
+
 zlib_pkg() {
     local build_dir=$1
     local install_dir=$2
     local name="Zlib"
-    local zlib_ver="1.2.8"
+    local zlib_ver="1.2.11"
     local zlib_url="http://zlib.net/zlib-$zlib_ver.tar.gz"
+    local zlib_md5="1c9f62f0778697a09d36121ead88e08e"
     local zlib_file="zlib-$zlib_ver.tar.gz"
     local zlib_dir="zlib-$zlib_ver"
     local loc_conf_opts=$config_opts
@@ -342,7 +428,7 @@ zlib_pkg() {
         local zlib_params="--static"
     fi
 
-    package_download $name $zlib_url $zlib_file
+    package_download $name $zlib_url $zlib_file $zlib_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
@@ -375,8 +461,9 @@ sqlite_pkg() {
     local build_dir=$1
     local install_dir=$2
     local name="SQLite"
-    local sqlite_ver="3080704"
-    local sqlite_url="http://www.sqlite.org/2014/sqlite-autoconf-$sqlite_ver.tar.gz"
+    local sqlite_ver="3100100"
+    local sqlite_url="http://www.sqlite.org/2016/sqlite-autoconf-$sqlite_ver.tar.gz"
+    local sqlite_md5="f315a86cb3e8671fe473baa8d34746f6"
     local sqlite_file="sqlite-$sqlite_ver.tar.gz"
     local sqlite_dir="sqlite-autoconf-$sqlite_ver"
     if [ $use_dynamic -eq 1 ]; then
@@ -385,7 +472,7 @@ sqlite_pkg() {
         local sqlite_params="--disable-shared --enable-static"
     fi
 
-    package_download $name $sqlite_url $sqlite_file
+    package_download $name $sqlite_url $sqlite_file $sqlite_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
@@ -402,6 +489,7 @@ cares_pkg() {
     local name="c-ares"
     local cares_ver="1.10.0"
     local cares_url="http://c-ares.haxx.se/download/c-ares-$cares_ver.tar.gz"
+    local cares_md5="1196067641411a75d3cbebe074fd36d8"
     local cares_file="cares-$cares_ver.tar.gz"
     local cares_dir="c-ares-$cares_ver"
     if [ $use_dynamic -eq 1 ]; then
@@ -410,7 +498,7 @@ cares_pkg() {
         local cares_params="--disable-shared --enable-static"
     fi
 
-    package_download $name $cares_url $cares_file
+    package_download $name $cares_url $cares_file $cares_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
@@ -425,8 +513,9 @@ curl_pkg() {
     local build_dir=$1
     local install_dir=$2
     local name="cURL"
-    local curl_ver="7.39.0"
+    local curl_ver="7.46.0"
     local curl_url="http://curl.haxx.se/download/curl-$curl_ver.tar.gz"
+    local curl_md5="230e682d59bf8ab6eca36da1d39ebd75"
     local curl_file="curl-$curl_ver.tar.gz"
     local curl_dir="curl-$curl_ver"
     local openssl_flags=""
@@ -450,7 +539,7 @@ curl_pkg() {
             --disable-shared --with-zlib=$install_dir --enable-ares=$install_dir $openssl_flags"
     fi
 
-    package_download $name $curl_url $curl_file
+    package_download $name $curl_url $curl_file $curl_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
@@ -467,6 +556,7 @@ readline_pkg() {
     local name="Readline"
     local readline_ver="6.3"
     local readline_url="ftp://ftp.cwru.edu/pub/bash/readline-$readline_ver.tar.gz"
+    local readline_md5="33c8fb279e981274f485fd91da77e94a"
     local readline_file="readline-$readline_ver.tar.gz"
     local readline_dir="readline-$readline_ver"
     if [ $use_dynamic -eq 1 ]; then
@@ -475,7 +565,7 @@ readline_pkg() {
         local readline_params="--disable-shared --enable-static"
     fi
 
-    package_download $name $readline_url $readline_file
+    package_download $name $readline_url $readline_file $readline_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
@@ -492,6 +582,7 @@ termcap_pkg() {
     local name="Termcap"
     local termcap_ver="1.3.1"
     local termcap_url="http://ftp.gnu.org/gnu/termcap/termcap-$termcap_ver.tar.gz"
+    local termcap_md5="ffe6f86e63a3a29fa53ac645faaabdfa"
     local termcap_file="termcap-$termcap_ver.tar.gz"
     local termcap_dir="termcap-$termcap_ver"
     if [ $use_dynamic -eq 1 ]; then
@@ -500,7 +591,7 @@ termcap_pkg() {
         local termcap_params="--disable-shared --enable-static"
     fi
 
-    package_download $name $termcap_url $termcap_file
+    package_download $name $termcap_url $termcap_file $termcap_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
@@ -518,17 +609,23 @@ freeimage_pkg() {
     local name="FreeImage"
     local freeimage_ver="3170"
     local freeimage_url="http://downloads.sourceforge.net/freeimage/FreeImage$freeimage_ver.zip"
+    local freeimage_md5="459e15f0ec75d6efa3c7bd63277ead86"
     local freeimage_file="freeimage-$freeimage_ver.zip"
     local freeimage_dir_extract="freeimage-$freeimage_ver"
     local freeimage_dir="freeimage-$freeimage_ver/FreeImage"
-    local freeimage_params="--disable-shared --enable-static"
 
-    package_download $name $freeimage_url $freeimage_file
+    package_download $name $freeimage_url $freeimage_file $freeimage_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
 
     package_extract $name $freeimage_file $freeimage_dir_extract
+    
+    #patch to fix problem with raw strings
+    find $freeimage_dir_extract/FreeImage/Source/LibWebP -type f -exec sed -i -e 's/"#\([A-X]\)"/" #\1 "/g' {} \;
+    
+    #patch to fix problem with newest compilers
+    sed -i "s#CXXFLAGS += -D__ANSI__#CXXFLAGS += -D__ANSI__ -std=c++98#g" $freeimage_dir_extract/FreeImage/Makefile.gnu 
 
     # replace Makefile on MacOS
     if [ "$(uname)" == "Darwin" ]; then
@@ -539,19 +636,24 @@ freeimage_pkg() {
         sed -i '/#define HAVE_SEARCH_H 1/d' $freeimage_dir/Source/LibTIFF4/tif_config.h
     fi
 
+    if [ $use_dynamic -eq 0 ]; then
+        export FREEIMAGE_LIBRARY_TYPE=STATIC
+    fi
+
     if [ "$(expr substr $(uname -s) 1 10)" != "MINGW32_NT" ]; then
         package_build $name $freeimage_dir
         # manually copy header and library
         cp $freeimage_dir/Dist/FreeImage.h $install_dir/include || exit 1
         cp $freeimage_dir/Dist/libfreeimage* $install_dir/lib || exit 1
-
-    # it doesn't detect MinGW
+    # MinGW
     else
         package_build $name $freeimage_dir "-f Makefile.mingw"
         # manually copy header and library
         cp $freeimage_dir/Dist/FreeImage.h $install_dir/include || exit 1
-        cp $freeimage_dir/Dist/FreeImage.dll $install_dir/lib || exit 1
-        cp $freeimage_dir/Dist/FreeImage.lib $install_dir/lib || exit 1
+        # ignore if not present
+        cp $freeimage_dir/Dist/FreeImage.dll $install_dir/lib || 1
+        cp $freeimage_dir/Dist/FreeImage.lib $install_dir/lib || 1
+        cp $freeimage_dir/Dist/libFreeImage.a $install_dir/lib || 1
     fi
 }
 
@@ -560,12 +662,13 @@ readline_win_pkg() {
     local build_dir=$1
     local install_dir=$2
     local name="Readline"
-    local readline_ver="5.0"
-    local readline_url="http://gnuwin32.sourceforge.net/downlinks/readline-bin-zip.php"
+    local readline_ver="5.0.1"
+    local readline_url="http://downloads.sourceforge.net/project/gnuwin32/readline/5.0-1/readline-5.0-1-bin.zip?r=&ts=1468492036&use_mirror=freefr"
+    local readline_md5="91beae8726edd7ad529f67d82153e61a"
     local readline_file="readline-bin.zip"
     local readline_dir="readline-bin"
 
-    package_download $name $readline_url $readline_file
+    package_download $name $readline_url $readline_file $readline_md5
     if [ $download_only -eq 1 ]; then
         return
     fi
@@ -574,7 +677,8 @@ readline_win_pkg() {
 
     # manually copy binary files
     cp -R $readline_dir/include/* $install_dir/include/ || exit 1
-    cp $readline_dir/lib/* $install_dir/lib/ || exit 1
+    # fix library name
+    cp $readline_dir/lib/libreadline.dll.a $install_dir/lib/libreadline.a || exit 1
 }
 
 build_sdk() {
@@ -585,7 +689,8 @@ build_sdk() {
     local freeimage_flags=""
     local megaapi_flags=""
     local openssl_flags=""
-    local sodium_flags=""
+    local sodium_flags="--without-sodium"
+    local cwd=$(pwd)
 
     echo "Configuring MEGA SDK"
 
@@ -659,6 +764,7 @@ build_sdk() {
             --with-sqlite=$install_dir \
             --without-cares \
             --without-curl \
+            --with-winhttp=$cwd \
             $freeimage_flags \
             $readline_flags \
             $disable_posix_threads \
@@ -673,7 +779,11 @@ build_sdk() {
     if [ $configure_only -eq 0 ]; then
         echo "Building MEGA SDK"
         make clean
-        make -j9 || exit 1
+        if [ "$(expr substr $(uname -s) 1 10)" != "MINGW32_NT" ]; then
+            make -j9 || exit 1
+        else
+            make
+        fi
         make install
     fi
 }
@@ -682,7 +792,7 @@ display_help() {
     local app=$(basename "$0")
     echo ""
     echo "Usage:"
-    echo " $app [-a] [-c] [-h] [-d] [-f] [-l] [-m opts] [-n] [-o path] [-p path] [-r] [-s] [-t] [-w] [-x opts] [-y]"
+    echo " $app [-a] [-c] [-h] [-d] [-e] [-f] [-g] [-l] [-m opts] [-n] [-o path] [-p path] [-q] [-r] [-s] [-t] [-w] [-x opts] [-y] [z]"
     echo ""
     echo "By the default this script builds static megacli executable."
     echo "This script can be run with numerous options to configure and build MEGA SDK."
@@ -691,40 +801,49 @@ display_help() {
     echo " -a : Enable MegaApi"
     echo " -c : Configure MEGA SDK and exit, do not build it"
     echo " -d : Enable debug build"
+    echo " -e : Enable cares"
     echo " -f : Disable FreeImage"
+    echo " -g : Enable curl"
     echo " -l : Use local software archive files instead of downloading"
     echo " -n : Disable example applications"
     echo " -s : Disable OpenSSL"
     echo " -r : Enable Android build"
     echo " -t : Disable POSIX Threads support"
     echo " -u : Enable Sodium cryptographic library"
+    echo " -v : Enable libuv"
     echo " -w : Download software archives and exit"
     echo " -y : Build dynamic library and executable (instead of static)"
     echo " -m [opts]: make options"
     echo " -x [opts]: configure options"
     echo " -o [path]: Directory to store and look for downloaded archives"
     echo " -p [path]: Installation directory"
+    echo " -q : Use Crypto++"
+    echo " -z : Disable libz"
     echo ""
 }
 
 main() {
     local cwd=$(pwd)
-    local work_dir=$cwd"/sdk_build/"
-    local build_dir=$work_dir"build/"
-    local install_dir=$work_dir"install/"
+    local work_dir=$cwd"/sdk_build"
+    local build_dir=$work_dir/"build"
+    local install_dir=$work_dir/"install"
     local debug=""
     # by the default store archives in work_dir
     local_dir=$work_dir
 
-    while getopts ":hacdflm:no:p:rstuyx:w" opt; do
+    while getopts ":habcdefglm:no:p:rstuvyx:wqz" opt; do
         case $opt in
             h)
                 display_help $0
-                exit
+                exit 1
                 ;;
             a)
                 echo "* Enabling MegaApi"
                 enable_megaapi=1
+                ;;
+             b)
+                only_build_dependencies=1
+                echo "* Building dependencies only."
                 ;;
             c)
                 echo "* Configure only"
@@ -734,9 +853,17 @@ main() {
                 echo "* DEBUG build"
                 debug="--enable-debug"
                 ;;
+            e)
+                echo "* Enabling external c-ares"
+                enable_cares=1
+                ;;
             f)
-                echo "* Disabling FreeImage"
+                echo "* Disabling external FreeImage"
                 disable_freeimage=1
+                ;;
+            g)
+                echo "* Enabling external Curl"
+                enable_curl=1
                 ;;
             l)
                 echo "* Using local files"
@@ -746,7 +873,7 @@ main() {
                 make_opts="$OPTARG"
                 ;;
             n)
-                no_examples="--disable-examples"
+                no_examples="--disable-examples --disable-megacmd"
                 ;;
             o)
                 local_dir=$(readlink -f $OPTARG)
@@ -758,6 +885,10 @@ main() {
             p)
                 install_dir=$(readlink -f $OPTARG)
                 echo "* Installing into $install_dir"
+                ;;
+            q)
+                echo "* Enabling external Crypto++"
+                enable_cryptopp=1
                 ;;
             r)
                 echo "* Building for Android"
@@ -772,7 +903,11 @@ main() {
                 ;;
             u)
                 enable_sodium=1
-                echo "* Enabling Sodium."
+                echo "* Enabling external Sodium."
+                ;;
+            v)
+                enable_libuv=1
+                echo "* Enabling external libuv."
                 ;;
             w)
                 download_only=1
@@ -786,19 +921,31 @@ main() {
                 use_dynamic=1
                 echo "* Building dynamic library and executable."
                 ;;
+            z)
+                disable_zlib=1
+                echo "* Disabling external libz."
+                ;;
             \?)
                 display_help $0
-                exit
+                exit 1
                 ;;
             *)
                 display_help $0
-                exit
+                exit 1
                 ;;
         esac
     done
     shift $((OPTIND-1))
 
     check_apps
+
+    if [ "$(expr substr $(uname -s) 1 10)" = "MINGW32_NT" ]; then
+        if [ ! -f "$cwd/winhttp.h" -o ! -f "$cwd/winhttp.lib"  ]; then
+            echo "ERROR! Windows build requires WinHTTP header and library to be present in MEGA SDK project folder!"
+            echo "Please get both winhttp.h and winhttp.lib files an put them into the MEGA SDK project's root folder."
+            exit 1
+        fi
+    fi
 
     trap on_exit_error EXIT
 
@@ -830,16 +977,31 @@ main() {
             openssl_pkg $build_dir $install_dir
         fi
     fi
-    cryptopp_pkg $build_dir $install_dir
+
+    if [ $enable_cryptopp -eq 1 ]; then
+        cryptopp_pkg $build_dir $install_dir
+    fi
+   
     if [ $enable_sodium -eq 1 ]; then
         sodium_pkg $build_dir $install_dir
     fi
 
-    zlib_pkg $build_dir $install_dir
+    if [ $disable_zlib -eq 0 ]; then
+        zlib_pkg $build_dir $install_dir
+    fi
+    
     sqlite_pkg $build_dir $install_dir
-    if [ "$(expr substr $(uname -s) 1 10)" != "MINGW32_NT" ]; then
+    
+    if [ $enable_cares -eq 1 ]; then
         cares_pkg $build_dir $install_dir
+    fi
+
+    if [ $enable_curl -eq 1 ]; then
         curl_pkg $build_dir $install_dir
+    fi
+
+    if [ $enable_libuv -eq 1 ]; then
+        libuv_pkg $build_dir $install_dir
     fi
 
     if [ $disable_freeimage -eq 0 ]; then
@@ -856,9 +1018,16 @@ main() {
        fi
     fi
 
-    if [ $download_only -eq 0 ]; then
+    if [ $download_only -eq 0 ] && [ $only_build_dependencies -eq 0 ]; then
         cd $cwd
-
+    
+        #fix libtool bug (prepends some '=' to certain paths)    
+        for i in `find $install_dir -name "*.la"`; do sed -i "s#=/#/#g" $i; done
+            
+        if [ $android_build -eq 1 ]; then
+            export "CXXFLAGS=$CXXFLAGS -std=c++11"
+        fi
+        export "CXXFLAGS=$CXXFLAGS -DCRYPTOPP_MAINTAIN_BACKWARDS_COMPATIBILITY_562"
         build_sdk $install_dir $debug
     fi
 

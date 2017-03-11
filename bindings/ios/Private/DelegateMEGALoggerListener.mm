@@ -1,5 +1,5 @@
 /**
- * @file DelegateMEGALogerListener.mm
+ * @file DelegateMEGALoggerListener.mm
  * @brief Listener to reveice and send logs to the app
  *
  * (c) 2013-2014 by Mega Limited, Auckland, New Zealand
@@ -23,55 +23,47 @@
 
 using namespace mega;
 
-DelegateMEGALogerListener::DelegateMEGALogerListener(id<MEGALoggerDelegate>listener) {
+DelegateMEGALoggerListener::DelegateMEGALoggerListener(id<MEGALoggerDelegate>listener) {
     this->listener = listener;
     MegaApi::setLoggerObject(this);
 }
 
-void DelegateMEGALogerListener::log(const char *time, int logLevel, const char *source, const char *message) {
+void DelegateMEGALoggerListener::log(const char *time, int logLevel, const char *source, const char *message) {
     if (listener != nil && [listener respondsToSelector:@selector(logWithTime:logLevel:source:message:)]) {
         
         [listener logWithTime:(time ? [NSString stringWithUTF8String:time] : nil) logLevel:(NSInteger)logLevel source:(source ? [NSString stringWithUTF8String:source] : nil) message:(message ? [NSString stringWithUTF8String:message] : nil)];
     }
     else {
-        std::ostringstream oss;
-        oss << time;
-        switch (logLevel)
-        {
+        NSString *output = [[NSString alloc] init];
+        
+        switch (logLevel) {
             case MEGALogLevelDebug:
-                oss << " (debug): ";
+                output = [output stringByAppendingString:@" (debug) "];
                 break;
             case MEGALogLevelError:
-                oss << " (error): ";
+                output = [output stringByAppendingString:@" (error) "];
                 break;
             case MEGALogLevelFatal:
-                oss << " (fatal): ";
+                output = [output stringByAppendingString:@" (fatal) "];
                 break;
             case MEGALogLevelInfo:
-                oss << " (info):  ";
+                output = [output stringByAppendingString:@" (info) "];
                 break;
             case MEGALogLevelMax:
-                oss << " (verb):  ";
+                output = [output stringByAppendingString:@" (verb) "];
                 break;
             case MEGALogLevelWarning:
-                oss << " (warn):  ";
+                output = [output stringByAppendingString:@" (warn) "];
+                break;
+                
+            default:
                 break;
         }
         
-        oss << message;
-        std::string filename = source;
-        if (filename.size())
-        {
-            int index = filename.find_last_of('\\');
-            if (index != std::string::npos && filename.size() > (index + 1))
-            {
-                filename = filename.substr(index + 1);
-            }
-            oss << " (" << filename << ")";
-        }
-        
-        oss << std::endl;
-        NSString *output = [NSString stringWithUTF8String:oss.str().c_str()];
+        output = [output stringByAppendingString:[NSString stringWithUTF8String:message]];
+        output = [output stringByAppendingString:@" ("];
+        output = [output stringByAppendingString:[[NSString stringWithUTF8String:source] lastPathComponent]];
+        output = [output stringByAppendingString:@")"];
         NSLog(@"%@", output);
     }
 }

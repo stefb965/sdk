@@ -44,7 +44,6 @@ typedef NS_ENUM (NSInteger, MEGARequestType) {
     MEGARequestTypeGetAttrUser,
     MEGARequestTypeSetAttrUser,
     MEGARequestTypeRetryPendingConnections,
-    MEGARequestTypeAddContact,
     MEGARequestTypeRemoveContact,
     MEGARequestTypeCreateAccount,
     MEGARequestTypeConfirmAccount,
@@ -60,7 +59,47 @@ typedef NS_ENUM (NSInteger, MEGARequestType) {
     MEGARequestTypeCancelAttrFile,
     MEGARequestTypeGetPricing,
     MEGARequestTypeGetPaymentId,
-    MEGARequestTypeGetUserData
+    MEGARequestTypeGetUserData,
+    MEGARequestTypeLoadBalancing,
+    MEGARequestTypeKillSession,
+    MEGARequestTypeSubmitPurchaseReceipt,
+    MEGARequestTypeCreditCardStore,
+    MEGARequestTypeUpgradeAccount,
+    MEGARequestTypeCreditCardQuerySubscriptions,
+    MEGARequestTypeCreditCardCancelSubscriptions,
+    MEGARequestTypeGetSessionTransferUrl,
+    MEGARequestTypeGetPaymentMethods,
+    MEGARequestTypeInviteContact,
+    MEGARequestTypeReplyContactRequest,
+    MEGARequestTypeSubmitFeedback,
+    MEGARequestTypeSendEvent,
+    MEGARequestTypeCleanRubbishBin,
+    MEGARequestTypeSetAttrNode,
+    MEGARequestTypeChatCreate,
+    MEGARequestTypeChatFetch,
+    MEGARequestTypeChatInvite,
+    MEGARequestTypeChatRemove,
+    MEGARequestTypeChatUrl,
+    MEGARequestTypeChatGrantAccess,
+    MEGARequestTypeChatRemoveAccess,
+    MEGARequestTypeUseHttpsOnly,
+    MEGARequestTypeSetProxy,
+    MEGARequestTypeGetRecoveryLink,
+    MEGARequestTypeQueryRecoveryLink,
+    MEGARequestTypeConfirmRecoveryLink,
+    MEGARequestTypeGetCancelLink,
+    MEGARequestTypeConfirmCancelLink,
+    MEGARequestTypeGetChangeEmailLink,
+    MEGARequestTypeConfirmChangeEmailLink,
+    MEGARequestTypeChatUpdatePermissions,
+    MEGARequestTypeChatTruncate,
+    MEGARequestTypeChatSetTitle,
+    MEGARequestTypeSetMaxConnections,
+    MEGARequestTypePauseTransfer,
+    MEGARequestTypeMoveTransfer,
+    MEGARequestTypeChatPresenceUrl,
+    MEGARequestTypeRegisterPushNotification,
+    MEGARequestTypeGetUserEmail
 };
 
 typedef NS_ENUM (NSInteger, MEGANodeAccessLevel) {
@@ -201,7 +240,6 @@ typedef NS_ENUM (NSInteger, MEGANodeAccessLevel) {
  * - [MEGASdk fastCreateAccountWithEmail:password:name] - Returns the name of the user
  * - [MEGASdk shareNode:withUser:level:] - Returns the handle of the folder to share
  * - [MEGASdk getAvatarUser:destinationFilePath:] - Returns the email of the user to get the avatar
- * - [MEGASdk addContactWithEmail:] - Returns the email of the contact
  * - [MEGASdk removeContactWithEmail:] - Returns the email of the contact
  * - [MEGASdk getUserData] - Returns the name of the user
  *

@@ -27,10 +27,53 @@
 #include <sys/utsname.h>
 #include <sys/ioctl.h>
 
+#ifdef __ANDROID__
+#include <jni.h>
+extern JavaVM *MEGAjvm;
+#endif
+
+#if defined(__MACH__) && !(TARGET_OS_IPHONE)
+#include <uuid/uuid.h>
+#endif
+
 namespace mega {
-PosixFileAccess::PosixFileAccess()
+    
+#ifdef USE_IOS
+    char* PosixFileSystemAccess::appbasepath = NULL;
+#endif
+
+#ifdef HAVE_AIO_RT
+PosixAsyncIOContext::PosixAsyncIOContext() : AsyncIOContext()
+{
+    aiocb = NULL;
+}
+
+PosixAsyncIOContext::~PosixAsyncIOContext()
+{
+    LOG_verbose << "Deleting PosixAsyncIOContext";
+    finish();
+}
+
+void PosixAsyncIOContext::finish()
+{
+    if (aiocb)
+    {
+        if (!finished)
+        {
+            LOG_debug << "Synchronously waiting for async operation";
+            AsyncIOContext::finish();
+        }
+        delete aiocb;
+        aiocb = NULL;
+    }
+    assert(finished);
+}
+#endif
+
+PosixFileAccess::PosixFileAccess(Waiter *w, int defaultfilepermissions) : FileAccess(w)
 {
     fd = -1;
+    this->defaultfilepermissions = defaultfilepermissions;
 
 #ifndef HAVE_FDOPENDIR
     dp = NULL;
@@ -59,13 +102,27 @@ bool PosixFileAccess::sysstat(m_time_t* mtime, m_off_t* size)
     struct stat statbuf;
     retry = false;
 
+#ifdef USE_IOS
+    string localname = this->localname;
+    if (PosixFileSystemAccess::appbasepath)
+    {
+        if (localname.size() && localname.at(0) != '/')
+        {
+            localname.insert(0, PosixFileSystemAccess::appbasepath);
+        }
+    }
+#endif
+
+    type = TYPE_UNKNOWN;
     if (!stat(localname.c_str(), &statbuf))
     {
         if (S_ISDIR(statbuf.st_mode))
         {
+            type = FOLDERNODE;
             return false;
         }
 
+        type = FILENODE;
         *size = statbuf.st_size;
         *mtime = statbuf.st_mtime;
 
@@ -77,8 +134,19 @@ bool PosixFileAccess::sysstat(m_time_t* mtime, m_off_t* size)
     return false;
 }
 
-bool PosixFileAccess::sysopen()
+bool PosixFileAccess::sysopen(bool)
 {
+#ifdef USE_IOS
+    string localname = this->localname;
+    if (PosixFileSystemAccess::appbasepath)
+    {
+        if (localname.size() && localname.at(0) != '/')
+        {
+            localname.insert(0, PosixFileSystemAccess::appbasepath);
+        }
+    }
+#endif
+
     return (fd = open(localname.c_str(), O_RDONLY)) >= 0;
 }
 
@@ -86,10 +154,182 @@ void PosixFileAccess::sysclose()
 {
     if (localname.size())
     {
-        // fd will always be valid at this point
-        close(fd);
-        fd = -1;
+        assert (fd >= 0);
+        if (fd >= 0)
+        {
+            close(fd);
+            fd = -1;
+        }
     }
+}
+
+bool PosixFileAccess::asyncavailable()
+{
+#ifdef HAVE_AIO_RT
+    #ifdef __APPLE__
+        return false;
+    #endif
+
+    return true;
+#else
+    return false;
+#endif
+}
+
+#ifdef HAVE_AIO_RT
+AsyncIOContext *PosixFileAccess::newasynccontext()
+{
+    return new PosixAsyncIOContext();
+}
+
+void PosixFileAccess::asyncopfinished(sigval sigev_value)
+{
+    PosixAsyncIOContext *context = (PosixAsyncIOContext *)(sigev_value.sival_ptr);
+    struct aiocb *aiocbp = context->aiocb;
+    int e = aio_error(aiocbp);
+    assert (e != EINPROGRESS);
+    context->retry = (e == EAGAIN);
+    context->failed = (aio_return(aiocbp) < 0);
+    if (!context->failed)
+    {
+        if (context->op == AsyncIOContext::READ && context->pad)
+        {
+            memset((void *)(((char *)(aiocbp->aio_buf)) + aiocbp->aio_nbytes), 0, context->pad);
+            LOG_verbose << "Async read finished OK";
+        }
+        else
+        {
+            LOG_verbose << "Async write finished OK";
+        }
+    }
+    else
+    {
+        LOG_warn << "Async operation finished with error: " << e;
+    }
+
+    asyncfscallback userCallback = context->userCallback;
+    void *userData = context->userData;
+    context->finished = true;
+    if (userCallback)
+    {
+        userCallback(userData);
+    }
+}
+#endif
+
+void PosixFileAccess::asyncsysopen(AsyncIOContext *context)
+{
+#ifdef HAVE_AIO_RT
+    string path;
+    path.assign((char *)context->buffer, context->len);
+    context->failed = !fopen(&path, context->access & AsyncIOContext::ACCESS_READ,
+                             context->access & AsyncIOContext::ACCESS_WRITE);
+    context->retry = retry;
+    context->finished = true;
+    if (context->userCallback)
+    {
+        context->userCallback(context->userData);
+    }
+#endif
+}
+
+void PosixFileAccess::asyncsysread(AsyncIOContext *context)
+{
+#ifdef HAVE_AIO_RT
+    if (!context)
+    {
+        return;
+    }
+
+    PosixAsyncIOContext *posixContext = dynamic_cast<PosixAsyncIOContext*>(context);
+    if (!posixContext)
+    {
+        context->failed = true;
+        context->retry = false;
+        context->finished = true;
+        if (context->userCallback)
+        {
+            context->userCallback(context->userData);
+        }
+        return;
+    }
+
+    struct aiocb *aiocbp = new struct aiocb;
+    memset(aiocbp, 0, sizeof (struct aiocb));
+
+    aiocbp->aio_fildes = fd;
+    aiocbp->aio_buf = (void *)posixContext->buffer;
+    aiocbp->aio_nbytes = posixContext->len;
+    aiocbp->aio_offset = posixContext->pos;
+    aiocbp->aio_sigevent.sigev_notify = SIGEV_THREAD;
+    aiocbp->aio_sigevent.sigev_notify_function = asyncopfinished;
+    aiocbp->aio_sigevent.sigev_value.sival_ptr = (void *)posixContext;
+    posixContext->aiocb = aiocbp;
+    if (aio_read(aiocbp))
+    {
+        posixContext->retry = (errno == EAGAIN);
+        posixContext->failed = true;
+        posixContext->finished = true;
+        posixContext->aiocb = NULL;
+        delete aiocbp;
+
+        LOG_warn << "Async read failed at startup:" << errno;
+        if (posixContext->userCallback)
+        {
+            posixContext->userCallback(posixContext->userData);
+        }
+    }
+#endif
+}
+
+void PosixFileAccess::asyncsyswrite(AsyncIOContext *context)
+{
+#ifdef HAVE_AIO_RT
+    if (!context)
+    {
+        return;
+    }
+
+    PosixAsyncIOContext *posixContext = dynamic_cast<PosixAsyncIOContext*>(context);
+    if (!posixContext)
+    {
+        context->failed = true;
+        context->retry = false;
+        context->finished = true;
+        if (context->userCallback)
+        {
+            context->userCallback(context->userData);
+        }
+        return;
+    }
+
+    struct aiocb *aiocbp = new struct aiocb;
+    memset(aiocbp, 0, sizeof (struct aiocb));
+
+    aiocbp->aio_fildes = fd;
+    aiocbp->aio_buf = (void *)posixContext->buffer;
+    aiocbp->aio_nbytes = posixContext->len;
+    aiocbp->aio_offset = posixContext->pos;
+    aiocbp->aio_sigevent.sigev_notify = SIGEV_THREAD;
+    aiocbp->aio_sigevent.sigev_notify_function = asyncopfinished;
+    aiocbp->aio_sigevent.sigev_value.sival_ptr = (void *)posixContext;
+    posixContext->aiocb = aiocbp;
+
+    if (aio_write(aiocbp))
+    {
+        posixContext->retry = (errno == EAGAIN);
+        posixContext->failed = true;
+        posixContext->finished = true;
+        posixContext->aiocb = NULL;
+        delete aiocbp;
+
+        LOG_warn << "Async write failed at startup: " << errno;
+        if (posixContext->userCallback)
+        {
+            posixContext->userCallback(posixContext->userData);
+        }
+    }
+#endif
 }
 
 // update local name
@@ -103,6 +343,7 @@ void PosixFileAccess::updatelocalname(string* name)
 
 bool PosixFileAccess::sysread(byte* dst, unsigned len, m_off_t pos)
 {
+    retry = false;
 #ifndef __ANDROID__
     return pread(fd, (char*)dst, len, pos) == len;
 #else
@@ -113,6 +354,7 @@ bool PosixFileAccess::sysread(byte* dst, unsigned len, m_off_t pos)
 
 bool PosixFileAccess::fwrite(const byte* data, unsigned len, m_off_t pos)
 {
+    retry = false;
 #ifndef __ANDROID__
     return pwrite(fd, data, len, pos) == len;
 #else
@@ -123,9 +365,67 @@ bool PosixFileAccess::fwrite(const byte* data, unsigned len, m_off_t pos)
 
 bool PosixFileAccess::fopen(string* f, bool read, bool write)
 {
+#ifdef USE_IOS
+    string absolutef;
+    if (PosixFileSystemAccess::appbasepath)
+    {
+        if (f->size() && f->at(0) != '/')
+        {
+            absolutef = PosixFileSystemAccess::appbasepath;
+            absolutef.append(*f);
+            f = &absolutef;
+        }
+    }
+#endif
+
     struct stat statbuf;
 
     retry = false;
+
+#ifdef __MACH__
+    if (!write)
+    {
+        char resolved_path[PATH_MAX];
+        struct stat statbuf;
+        if (memcmp(f->c_str(), ".", 2) && memcmp(f->c_str(), "..", 3)
+                && !lstat(f->c_str(), &statbuf)
+                && !S_ISLNK(statbuf.st_mode)
+                && realpath(f->c_str(), resolved_path) == resolved_path)
+        {
+            const char *fname;
+            size_t fnamesize;
+            if ((fname = strrchr(f->c_str(), '/')))
+            {
+                fname++;
+                fnamesize = f->size() - (fname - f->c_str());
+            }
+            else
+            {
+                fname =  f->c_str();
+                fnamesize = f->size();
+            }
+            fnamesize++;
+
+            const char *rname;
+            size_t rnamesize;
+            if ((rname = strrchr(resolved_path, '/')))
+            {
+                rname++;
+            }
+            else
+            {
+                rname = resolved_path;
+            }
+            rnamesize = strlen(rname) + 1;
+
+            if (rnamesize == fnamesize && memcmp(fname, rname, fnamesize))
+            {
+                LOG_warn << "fopen failed due to invalid case: " << f->c_str();
+                return false;
+            }
+        }
+    }
+#endif
 
 #ifndef HAVE_FDOPENDIR
     if (!write)
@@ -152,8 +452,19 @@ bool PosixFileAccess::fopen(string* f, bool read, bool write)
     }
 #endif
 
-    if ((fd = open(f->c_str(), write ? (read ? O_RDWR : O_WRONLY | O_CREAT | O_TRUNC) : O_RDONLY, 0600)) >= 0)
+    mode_t mode;
+    if (write)
     {
+        mode = umask(0);
+    }
+
+    if ((fd = open(f->c_str(), write ? (read ? O_RDWR : O_WRONLY | O_CREAT) : O_RDONLY, defaultfilepermissions)) >= 0)
+    {
+        if (write)
+        {
+            umask(mode);
+        }
+
         if (!fstat(fd, &statbuf))
         {
             #ifdef __MACH__
@@ -179,6 +490,10 @@ bool PosixFileAccess::fopen(string* f, bool read, bool write)
 
         close(fd);
     }
+    else if (write)
+    {
+        umask(mode);
+    }
 
     return false;
 }
@@ -191,7 +506,23 @@ PosixFileSystemAccess::PosixFileSystemAccess(int fseventsfd)
     notifyfailed = true;
     notifyfd = -1;
 
+    defaultfilepermissions = 0600;
+    defaultfolderpermissions = 0700;
+
     localseparator = "/";
+
+#ifdef USE_IOS
+    if (!appbasepath)
+    {
+        string basepath;
+        ios_appbasepath(&basepath);
+        if (basepath.size())
+        {
+            basepath.append("/");
+            appbasepath = strdup(basepath.c_str());
+        }
+    }
+#endif
 
 #ifdef USE_INOTIFY
     lastcookie = 0;
@@ -342,9 +673,10 @@ int PosixFileSystemAccess::checkevents(Waiter* w)
                                  || memcmp(lastname.c_str(), ignore->data(), ignore->size())
                                  || (lastname.size() > ignore->size()
                                   && memcmp(lastname.c_str() + ignore->size(), localseparator.c_str(), localseparator.size())))
-                                {
+                                {                                    
                                     // previous IN_MOVED_FROM is not followed by the
                                     // corresponding IN_MOVED_TO, so was actually a deletion
+                                    LOG_debug << "Filesystem notification (deletion). Root: " << lastlocalnode->name << "   Path: " << lastname;
                                     lastlocalnode->sync->dirnotify->notify(DirNotify::DIREVENTS,
                                                                            lastlocalnode,
                                                                            lastname.c_str(),
@@ -374,6 +706,7 @@ int PosixFileSystemAccess::checkevents(Waiter* w)
                                  || (insize > ignore->size()
                                   && memcmp(in->name + ignore->size(), localseparator.c_str(), localseparator.size())))
                                 {
+                                    LOG_debug << "Filesystem notification. Root: " << it->second->name << "   Path: " << in->name;
                                     it->second->sync->dirnotify->notify(DirNotify::DIREVENTS,
                                                                         it->second, in->name,
                                                                         insize);
@@ -397,6 +730,7 @@ int PosixFileSystemAccess::checkevents(Waiter* w)
              || (lastname.size() > ignore->size()
               && memcmp(lastname.c_str() + ignore->size(), localseparator.c_str(), localseparator.size())))
             {
+                LOG_debug << "Filesystem notification. Root: " << lastlocalnode->name << "   Path: " << lastname;
                 lastlocalnode->sync->dirnotify->notify(DirNotify::DIREVENTS,
                                                        lastlocalnode,
                                                        lastname.c_str(),
@@ -556,6 +890,7 @@ int PosixFileSystemAccess::checkevents(Waiter* w)
             {
                 if (paths[i])
                 {
+                    LOG_debug << "Filesystem notification. Root: " << pathsync[i]->localroot.name << "   Path: " << paths[i];
                     pathsync[i]->dirnotify->notify(DirNotify::DIREVENTS,
                                                    &pathsync[i]->localroot,
                                                    paths[i],
@@ -600,6 +935,27 @@ bool PosixFileSystemAccess::getsname(string*, string*) const
 
 bool PosixFileSystemAccess::renamelocal(string* oldname, string* newname, bool)
 {
+#ifdef USE_IOS
+    string absoluteoldname;
+    string absolutenewname;
+    if (appbasepath)
+    {
+        if (oldname->size() && oldname->at(0) != '/')
+        {
+            absoluteoldname = appbasepath;
+            absoluteoldname.append(*oldname);
+            oldname = &absoluteoldname;
+        }
+
+        if (newname->size() && newname->at(0) != '/')
+        {
+            absolutenewname = appbasepath;
+            absolutenewname.append(*newname);
+            newname = &absolutenewname;
+        }
+    }
+#endif
+
     if (!rename(oldname->c_str(), newname->c_str()))
     {
         return true;
@@ -608,11 +964,35 @@ bool PosixFileSystemAccess::renamelocal(string* oldname, string* newname, bool)
     target_exists = errno == EEXIST;
     transient_error = errno == ETXTBSY || errno == EBUSY;
 
+    int e = errno;
+    LOG_warn << "Unable to move file: " << oldname->c_str() << " to " << newname->c_str() << ". Error code: " << e;
+
     return false;
 }
 
 bool PosixFileSystemAccess::copylocal(string* oldname, string* newname, m_time_t mtime)
 {
+#ifdef USE_IOS
+    string absoluteoldname;
+    string absolutenewname;
+    if (appbasepath)
+    {
+        if (oldname->size() && oldname->at(0) != '/')
+        {
+            absoluteoldname = appbasepath;
+            absoluteoldname.append(*oldname);
+            oldname = &absoluteoldname;
+        }
+
+        if (newname->size() && newname->at(0) != '/')
+        {
+            absolutenewname = appbasepath;
+            absolutenewname.append(*newname);
+            newname = &absolutenewname;
+        }
+    }
+#endif
+
     int sfd, tfd;
     ssize_t t = -1;
 
@@ -620,24 +1000,34 @@ bool PosixFileSystemAccess::copylocal(string* oldname, string* newname, m_time_t
     // Linux-specific - kernel 2.6.33+ required
     if ((sfd = open(oldname->c_str(), O_RDONLY | O_DIRECT)) >= 0)
     {
-        if ((tfd = open(newname->c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, 0600)) >= 0)
+        LOG_verbose << "Copying via sendfile";
+        mode_t mode = umask(0);
+        if ((tfd = open(newname->c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_DIRECT, defaultfilepermissions)) >= 0)
         {
+            umask(mode);
             while ((t = sendfile(tfd, sfd, NULL, 1024 * 1024 * 1024)) > 0);
 #else
     char buf[16384];
 
     if ((sfd = open(oldname->c_str(), O_RDONLY)) >= 0)
     {
-        if ((tfd = open(newname->c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600)) >= 0)
+        LOG_verbose << "Copying via read/write";
+        mode_t mode = umask(0);
+        if ((tfd = open(newname->c_str(), O_WRONLY | O_CREAT | O_TRUNC, defaultfilepermissions)) >= 0)
         {
+            umask(mode);
             while (((t = read(sfd, buf, sizeof buf)) > 0) && write(tfd, buf, t) == t);
 #endif
             close(tfd);
         }
         else
         {
+            umask(mode);
             target_exists = errno == EEXIST;
             transient_error = errno == ETXTBSY || errno == EBUSY;
+
+            int e = errno;
+            LOG_warn << "Unable to copy file. Error code: " << e;
         }
 
         close(sfd);
@@ -645,7 +1035,17 @@ bool PosixFileSystemAccess::copylocal(string* oldname, string* newname, m_time_t
 
     if (!t)
     {
-        setmtimelocal(newname,mtime);
+#ifdef ENABLE_SYNC
+        t = !setmtimelocal(newname, mtime);
+#else
+        // fails in setmtimelocal are allowed in non sync clients.
+        setmtimelocal(newname, mtime);
+#endif
+    }
+    else
+    {
+        int e = errno;
+        LOG_debug << "Unable to copy file: " << oldname->c_str() << " to " << newname->c_str() << ". Error code: " << e;
     }
 
     return !t;
@@ -659,6 +1059,19 @@ bool PosixFileSystemAccess::rubbishlocal(string* name)
 
 bool PosixFileSystemAccess::unlinklocal(string* name)
 {
+#ifdef USE_IOS
+    string absolutename;
+    if (appbasepath)
+    {
+        if (name->size() && name->at(0) != '/')
+        {
+            absolutename = appbasepath;
+            absolutename.append(*name);
+            name = &absolutename;
+        }
+    }
+#endif
+
     if (!unlink(name->c_str())) return true;
 
     transient_error = errno == ETXTBSY || errno == EBUSY;
@@ -670,6 +1083,19 @@ bool PosixFileSystemAccess::unlinklocal(string* name)
 // (does not recurse into mounted devices)
 void PosixFileSystemAccess::emptydirlocal(string* name, dev_t basedev)
 {
+#ifdef USE_IOS
+    string absolutename;
+    if (appbasepath)
+    {
+        if (name->size() && name->at(0) != '/')
+        {
+            absolutename = appbasepath;
+            absolutename.append(*name);
+            name = &absolutename;
+        }
+    }
+#endif
+
     DIR* dp;
     dirent* d;
     int removed;
@@ -727,8 +1153,41 @@ void PosixFileSystemAccess::emptydirlocal(string* name, dev_t basedev)
     }
 }
 
+int PosixFileSystemAccess::getdefaultfilepermissions()
+{
+    return defaultfilepermissions;
+}
+
+void PosixFileSystemAccess::setdefaultfilepermissions(int permissions)
+{
+    defaultfilepermissions = permissions | 0600;
+}
+
+int PosixFileSystemAccess::getdefaultfolderpermissions()
+{
+    return defaultfolderpermissions;
+}
+
+void PosixFileSystemAccess::setdefaultfolderpermissions(int permissions)
+{
+    defaultfolderpermissions = permissions | 0700;
+}
+
 bool PosixFileSystemAccess::rmdirlocal(string* name)
 {
+#ifdef USE_IOS
+    string absolutename;
+    if (appbasepath)
+    {
+        if (name->size() && name->at(0) != '/')
+        {
+            absolutename = appbasepath;
+            absolutename.append(*name);
+            name = &absolutename;
+        }
+    }
+#endif
+
     emptydirlocal(name);
 
     if (!rmdir(name->c_str())) return true;
@@ -740,26 +1199,82 @@ bool PosixFileSystemAccess::rmdirlocal(string* name)
 
 bool PosixFileSystemAccess::mkdirlocal(string* name, bool)
 {
-    bool r = !mkdir(name->c_str(), 0700);
+#ifdef USE_IOS
+    string absolutename;
+    if (appbasepath)
+    {
+        if (name->size() && name->at(0) != '/')
+        {
+            absolutename = appbasepath;
+            absolutename.append(*name);
+            name = &absolutename;
+        }
+    }
+#endif
+
+    mode_t mode = umask(0);
+    bool r = !mkdir(name->c_str(), defaultfolderpermissions);
+    umask(mode);
 
     if (!r)
     {
         target_exists = errno == EEXIST;
+        if (target_exists)
+        {
+            LOG_debug << "Error creating local directory: " << name->c_str() << " errno: " << errno;
+        }
+        else
+        {
+            LOG_err << "Error creating local directory: " << name->c_str() << " errno: " << errno;
+        }
         transient_error = errno == ETXTBSY || errno == EBUSY;
     }
 
     return r;
 }
 
-bool PosixFileSystemAccess::setmtimelocal(string* name, m_time_t mtime) const
+bool PosixFileSystemAccess::setmtimelocal(string* name, m_time_t mtime)
 {
+#ifdef USE_IOS
+    string absolutename;
+    if (appbasepath)
+    {
+        if (name->size() && name->at(0) != '/')
+        {
+            absolutename = appbasepath;
+            absolutename.append(*name);
+            name = &absolutename;
+        }
+    }
+#endif
+
     struct utimbuf times = { (time_t)mtime, (time_t)mtime };
 
-    return !utime(name->c_str(), &times);
+    bool success = !utime(name->c_str(), &times);
+    if (!success)
+    {
+        LOG_err << "Error setting mtime: " << name <<" mtime: "<< mtime << " errno: " << errno;
+        transient_error = errno == ETXTBSY || errno == EBUSY;
+    }
+
+    return success;
 }
 
 bool PosixFileSystemAccess::chdirlocal(string* name) const
 {
+#ifdef USE_IOS
+    string absolutename;
+    if (appbasepath)
+    {
+        if (name->size() && name->at(0) != '/')
+        {
+            absolutename = appbasepath;
+            absolutename.append(*name);
+            name = &absolutename;
+        }
+    }
+#endif
+
     return !chdir(name->c_str());
 }
 
@@ -814,6 +1329,30 @@ bool PosixFileSystemAccess::getextension(string* filename, char* extension, int 
     return false;
 }
 
+bool PosixFileSystemAccess::expanselocalpath(string *path, string *absolutepath)
+{
+    ostringstream os;
+    if (path->at(0) == '/')
+    {
+        *absolutepath = *path;
+        return true;
+    }
+    else
+    {
+        char cCurrentPath[PATH_MAX];
+        if (!getcwd(cCurrentPath, sizeof(cCurrentPath)))
+        {
+            *absolutepath = *path;
+            return false;
+        }
+
+        *absolutepath = cCurrentPath;
+        absolutepath->append("/");
+        absolutepath->append(*path);
+        return true;
+    }
+}
+
 void PosixFileSystemAccess::osversion(string* u) const
 {
     utsname uts;
@@ -826,6 +1365,169 @@ void PosixFileSystemAccess::osversion(string* u) const
         u->append(" ");
         u->append(uts.machine);
     }
+}
+
+void PosixFileSystemAccess::statsid(string *id) const
+{
+#ifdef __ANDROID__
+    if (!MEGAjvm)
+    {
+        LOG_err << "No JVM found";
+        return;
+    }
+
+    try
+    {
+        JNIEnv *env;
+        MEGAjvm->AttachCurrentThread(&env, NULL);
+        jclass appGlobalsClass = env->FindClass("android/app/AppGlobals");
+        if (!appGlobalsClass)
+        {
+            LOG_err << "Failed to get android/app/AppGlobals";
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        jmethodID getInitialApplicationMID = env->GetStaticMethodID(appGlobalsClass,"getInitialApplication","()Landroid/app/Application;");
+        if (!getInitialApplicationMID)
+        {
+            LOG_err << "Failed to get getInitialApplication()";
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        jobject context = env->CallStaticObjectMethod(appGlobalsClass, getInitialApplicationMID);
+        if (!context)
+        {
+            LOG_err << "Failed to get context";
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        jclass contextClass = env->GetObjectClass(context);
+        if (!contextClass)
+        {
+            LOG_err << "Failed to get context class";
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        jmethodID getContentResolverMID = env->GetMethodID(contextClass, "getContentResolver", "()Landroid/content/ContentResolver;");
+        if (!getContentResolverMID)
+        {
+            LOG_err << "Failed to get getContentResolver()";
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        jobject contentResolver = env->CallObjectMethod(context, getContentResolverMID);
+        if (!contentResolver)
+        {
+            LOG_err << "Failed to get ContentResolver";
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        jclass settingsSecureClass = env->FindClass("android/provider/Settings$Secure");
+        if (!settingsSecureClass)
+        {
+            LOG_err << "Failed to get Settings.Secure class";
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        jmethodID getStringMID = env->GetStaticMethodID(settingsSecureClass, "getString", "(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;");
+        if (!getStringMID)
+        {
+            LOG_err << "Failed to get getString()";
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        jstring idStr = (jstring) env->NewStringUTF("android_id");
+        if (!idStr)
+        {
+            LOG_err << "Failed to get idStr";
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        jstring androidId = (jstring) env->CallStaticObjectMethod(settingsSecureClass, getStringMID, contentResolver, idStr);
+        if (!androidId)
+        {
+            LOG_err << "Failed to get android_id";
+            env->DeleteLocalRef(idStr);
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        const char *androidIdString = env->GetStringUTFChars(androidId, NULL);
+        if (!androidIdString)
+        {
+            LOG_err << "Failed to get android_id bytes";
+            env->DeleteLocalRef(idStr);
+            MEGAjvm->DetachCurrentThread();
+            return;
+        }
+
+        id->append(androidIdString);
+        env->DeleteLocalRef(idStr);
+        env->ReleaseStringUTFChars(androidId, androidIdString);
+        MEGAjvm->DetachCurrentThread();
+    }
+    catch (...)
+    {
+        try
+        {
+            MEGAjvm->DetachCurrentThread();
+        }
+        catch (...) { }
+    }
+#elif TARGET_OS_IPHONE
+#ifdef USE_IOS
+    ios_statsid(id);
+#endif
+#elif defined(__MACH__)
+    uuid_t uuid;
+    struct timespec wait = {1, 0};
+    if (gethostuuid(uuid, &wait))
+    {
+        return;
+    }
+
+    char uuid_str[37];
+    uuid_unparse(uuid, uuid_str);
+    id->append(uuid_str);
+#else
+    int fd = open("/etc/machine-id", O_RDONLY);
+    if (fd < 0)
+    {
+        fd = open("/var/lib/dbus/machine-id", O_RDONLY);
+        if (fd < 0)
+        {
+            return;
+        }
+    }
+
+    char buff[512];
+    int len = read(fd, buff, 512);
+    close(fd);
+
+    if (len <= 0)
+    {
+        return;
+    }
+
+    if (buff[len - 1] == '\n')
+    {
+        len--;
+    }
+
+    if (len > 0)
+    {
+        id->append(buff, len);
+    }
+#endif
 }
 
 PosixDirNotify::PosixDirNotify(string* localbasepath, string* ignore) : DirNotify(localbasepath, ignore)
@@ -884,7 +1586,7 @@ fsfp_t PosixDirNotify::fsfingerprint()
 
 FileAccess* PosixFileSystemAccess::newfileaccess()
 {
-    return new PosixFileAccess();
+    return new PosixFileAccess(waiter, defaultfilepermissions);
 }
 
 DirAccess* PosixFileSystemAccess::newdiraccess()
@@ -903,6 +1605,19 @@ DirNotify* PosixFileSystemAccess::newdirnotify(string* localpath, string* ignore
 
 bool PosixDirAccess::dopen(string* path, FileAccess* f, bool doglob)
 {
+#ifdef USE_IOS
+    string absolutepath;
+    if (PosixFileSystemAccess::appbasepath)
+    {
+        if (path->size() && path->at(0) != '/')
+        {
+            absolutepath = PosixFileSystemAccess::appbasepath;
+            absolutepath.append(*path);
+            path = &absolutepath;
+        }
+    }
+#endif
+
     if (doglob)
     {
         if (glob(path->c_str(), GLOB_NOSORT, NULL, &globbuf))
@@ -936,6 +1651,19 @@ bool PosixDirAccess::dopen(string* path, FileAccess* f, bool doglob)
 
 bool PosixDirAccess::dnext(string* path, string* name, bool followsymlinks, nodetype_t* type)
 {
+#ifdef USE_IOS
+    string absolutepath;
+    if (PosixFileSystemAccess::appbasepath)
+    {
+        if (path->size() && path->at(0) != '/')
+        {
+            absolutepath = PosixFileSystemAccess::appbasepath;
+            absolutepath.append(*path);
+            path = &absolutepath;
+        }
+    }
+#endif
+
     if (globbing)
     {
         struct stat statbuf;

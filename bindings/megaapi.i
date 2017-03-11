@@ -1,10 +1,44 @@
 #ifdef SWIGJAVA
-#define __ANDROID__
+#define ENABLE_CHAT
 #endif
 
 %module(directors="1") mega
 %{
+#define ENABLE_CHAT
 #include "megaapi.h"
+
+JavaVM *MEGAjvm = NULL;
+
+#ifdef __ANDROID__
+jstring strEncodeUTF8;
+jclass clsString;
+jmethodID ctorString;
+int sdkVersion = 100;
+#endif
+
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
+{
+    MEGAjvm = jvm;
+#ifdef __ANDROID__
+    JNIEnv* jenv = NULL;
+    jvm->GetEnv((void**)&jenv, JNI_VERSION_1_4);
+    jclass buildVersionClass = jenv->FindClass("android/os/Build$VERSION");
+    jfieldID sdkVersionField = jenv->GetStaticFieldID(buildVersionClass, "SDK_INT", "I");
+    sdkVersion = jenv->GetStaticIntField(buildVersionClass, sdkVersionField);
+    if (sdkVersion < 23)
+    {
+        jclass clsStringLocal = jenv->FindClass("java/lang/String");
+        clsString = (jclass)jenv->NewGlobalRef(clsStringLocal);
+        jenv->DeleteLocalRef(clsStringLocal);
+        ctorString = jenv->GetMethodID(clsString, "<init>", "([BLjava/lang/String;)V");
+        jstring strEncodeUTF8Local = jenv->NewStringUTF("UTF-8");
+        strEncodeUTF8 = (jstring)jenv->NewGlobalRef(strEncodeUTF8Local);
+        jenv->DeleteLocalRef(strEncodeUTF8Local);
+    }
+#endif
+    return JNI_VERSION_1_4;
+}
+
 %}
 
 #ifdef SWIGJAVA
@@ -24,8 +58,16 @@
                     try {
                         System.load(System.getProperty("user.dir") + "/libs/mega.dll");
                     } catch (UnsatisfiedLinkError e4) {
-                        System.err.println("Native code library failed to load. \n" + e1 + "\n" + e2 + "\n" + e3 + "\n" + e4);
-                        System.exit(1);
+                        try {
+                            System.load(System.getProperty("user.dir") + "/libmega.dylib");
+                        } catch (UnsatisfiedLinkError e5) {
+                            try {
+                                System.load(System.getProperty("user.dir") + "/libs/libmegajava.dylib");
+                            } catch (UnsatisfiedLinkError e6) {
+                                System.err.println("Native code library failed to load. \n" + e1 + "\n" + e2 + "\n" + e3 + "\n" + e4 + "\n" + e5 + "\n" + e6);
+                                System.exit(1);
+                            }
+                        }
                     }
                 }
             }
@@ -48,6 +90,52 @@
 %typemap(javaclassmodifiers) mega::TransferList "class";
 %typemap(javaclassmodifiers) mega::ShareList "class";
 %typemap(javaclassmodifiers) mega::UserList "class";
+
+
+%typemap(out) char*
+%{
+    if ($1)
+    {
+#ifdef __ANDROID__
+        if (sdkVersion < 23)
+        {
+            int len = strlen($1);
+            jbyteArray $1_array = jenv->NewByteArray(len);
+            jenv->SetByteArrayRegion($1_array, 0, len, (const jbyte*)$1);
+            $result = (jstring) jenv->NewObject(clsString, ctorString, $1_array, strEncodeUTF8);
+            jenv->DeleteLocalRef($1_array);
+        }
+        else
+#endif
+        {
+            $result = jenv->NewStringUTF($1);
+        }
+    }
+%}
+
+%typemap(directorin,descriptor="Ljava/lang/String;") char *
+%{
+    $input = 0;
+    if ($1)
+    {
+#ifdef __ANDROID__
+        if (sdkVersion < 23)
+        {
+            int len = strlen($1);
+            jbyteArray $1_array = jenv->NewByteArray(len);
+            jenv->SetByteArrayRegion($1_array, 0, len, (const jbyte*)$1);
+            $input = (jstring) jenv->NewObject(clsString, ctorString, $1_array, strEncodeUTF8);
+            jenv->DeleteLocalRef($1_array);
+        }
+        else
+#endif
+        {
+            $input = jenv->NewStringUTF($1);
+        }
+    }
+    Swig::LocalRefGuard $1_refguard(jenv, $input);
+%}
+
 
 //Make the "delete" method protected
 %typemap(javadestruct, methodname="delete", methodmodifiers="protected synchronized") SWIGTYPE 
@@ -72,13 +160,14 @@
 
 
 #ifdef SWIGJAVA
+#if SWIG_VERSION < 0x030000
 %typemap(directorargout) (const char *time, int loglevel, const char *source, const char *message)
 %{
 	jenv->DeleteLocalRef(jtime); 
 	jenv->DeleteLocalRef(jsource);
 	jenv->DeleteLocalRef(jmessage); 
 %}
-
+#endif
 
 %apply (char *STRING, size_t LENGTH) {(char *buffer, size_t size)};
 %typemap(directorargout) (char *buffer, size_t size)
@@ -93,10 +182,13 @@
 
 
 #ifdef SWIGJAVA
+
+#if SWIG_VERSION < 0x030000
 %typemap(directorargout) (const char* path)
 %{ 
 	jenv->DeleteLocalRef(jpath); 
 %}
+#endif
 
 %apply (char *STRING, size_t LENGTH) {(char *bitmapData, size_t size)};
 %typemap(directorin, descriptor="[B") (char *bitmapData, size_t size)
@@ -133,50 +225,87 @@
 %ignore mega::MegaApi::MEGA_DEBRIS_FOLDER;
 %ignore mega::MegaNode::getNodeKey;
 %ignore mega::MegaNode::getAttrString;
+%ignore mega::MegaNode::getPrivateAuth;
+%ignore mega::MegaNode::getPublicAuth;
+%ignore mega::MegaApi::createForeignFileNode;
+%ignore mega::MegaApi::createForeignFolderNode;
 %ignore mega::MegaListener::onSyncStateChanged;
 %ignore mega::MegaListener::onSyncFileStateChanged;
 %ignore mega::MegaTransfer::getListener;
 %ignore mega::MegaRequest::getListener;
 %ignore mega::MegaHashSignature;
+%ignore mega::SynchronousRequestListener;
+%ignore mega::SynchronousTransferListener;
 
 %newobject mega::MegaError::copy;
 %newobject mega::MegaRequest::copy;
 %newobject mega::MegaTransfer::copy;
+%newobject mega::MegaTransferList::copy;
 %newobject mega::MegaNode::copy;
+%newobject mega::MegaNodeList::copy;
 %newobject mega::MegaShare::copy;
+%newobject mega::MegaShareList::copy;
 %newobject mega::MegaUser::copy;
+%newobject mega::MegaUserList::copy;
+%newobject mega::MegaContactRequest::copy;
+%newobject mega::MegaContactRequestList::copy;
 %newobject mega::MegaRequest::getPublicMegaNode;
 %newobject mega::MegaTransfer::getPublicMegaNode;
 %newobject mega::MegaNode::getBase64Handle;
-%newobject mega::MegaApi::getChildren;
-%newobject mega::MegaApi::getChildNode;
-%newobject mega::MegaApi::getContacts;
-%newobject mega::MegaApi::getTransfers;
-%newobject mega::MegaApi::getContact;
-%newobject mega::MegaApi::getInShares;
-%newobject mega::MegaApi::getOutShares;
-%newobject mega::MegaApi::getNodePath;
 %newobject mega::MegaApi::getBase64PwKey;
 %newobject mega::MegaApi::getStringHash;
-%newobject mega::MegaApi::search;
-%newobject mega::MegaApi::ebcEncryptKey;
-%newobject mega::MegaApi::getMyEmail;
+%newobject mega::MegaApi::handleToBase64;
+%newobject mega::MegaApi::userHandleToBase64;
 %newobject mega::MegaApi::dumpSession;
+%newobject mega::MegaApi::dumpXMPPSession;
+%newobject mega::MegaApi::getMyEmail;
+%newobject mega::MegaApi::getMyUserHandle;
+%newobject mega::MegaApi::getMyUser;
+%newobject mega::MegaApi::getMyXMPPJid;
+%newobject mega::MegaApi::getMyFingerprint;
+%newobject mega::MegaApi::exportMasterKey;
+%newobject mega::MegaApi::getTransfers;
+%newobject mega::MegaApi::getTransferByTag;
+%newobject mega::MegaApi::getChildTransfers;
+%newobject mega::MegaApi::getChildren;
+%newobject mega::MegaApi::getChildNode;
+%newobject mega::MegaApi::getParentNode;
+%newobject mega::MegaApi::getNodePath;
 %newobject mega::MegaApi::getNodeByPath;
 %newobject mega::MegaApi::getNodeByHandle;
+%newobject mega::MegaApi::getContactRequestByHandle;
+%newobject mega::MegaApi::getContacts;
+%newobject mega::MegaApi::getContact;
+%newobject mega::MegaApi::getInShares;
+%newobject mega::MegaApi::getInSharesList;
+%newobject mega::MegaApi::getOutShares;
+%newobject mega::MegaApi::getPendingOutShares;
+%newobject mega::MegaApi::getPublicLinks;
+%newobject mega::MegaApi::getIncomingContactRequests;
+%newobject mega::MegaApi::getOutgoingContactRequests;
+%newobject mega::MegaApi::getFingerprint;
+%newobject mega::MegaApi::getNodeByFingerprint;
+%newobject mega::MegaApi::getNodesByFingerprint;
+%newobject mega::MegaApi::getExportableNodeByFingerprint;
+%newobject mega::MegaApi::getCRC;
+%newobject mega::MegaApi::getNodeByCRC;
 %newobject mega::MegaApi::getRootNode;
 %newobject mega::MegaApi::getInboxNode;
 %newobject mega::MegaApi::getRubbishNode;
-%newobject mega::MegaApi::getParentNode;
-%newobject mega::MegaApi::getFingerprint;
-%newobject mega::MegaApi::getNodeByFingerprint;
-%newobject mega::MegaApi::hasFingerprint;
-%newobject mega::MegaApi::exportMasterKey;
-%newobject mega::MegaApi::getTransferByTag;
-%newobject mega::MegaApi::getCRC;
-%newobject mega::MegaApi::getNodeByCRC;
+%newobject mega::MegaApi::escapeFsIncompatible;
+%newobject mega::MegaApi::unescapeFsIncompatible;
+%newobject mega::MegaApi::base64ToBase32;
+%newobject mega::MegaApi::base32ToBase64;
+%newobject mega::MegaApi::search;
+%newobject mega::MegaApi::getCRCFromFingerprint;
+%newobject mega::MegaApi::getSessionTransferURL;
+%newobject mega::MegaApi::getAccountAuth;
+%newobject mega::MegaApi::authorizeNode;
+
 %newobject mega::MegaRequest::getMegaAccountDetails;
 %newobject mega::MegaRequest::getPricing;
+%newobject mega::MegaAccountDetails::getSubscriptionMethod;
+%newobject mega::MegaAccountDetails::getSubscriptionCycle;
 
 typedef long long time_t;
 typedef long long uint64_t;

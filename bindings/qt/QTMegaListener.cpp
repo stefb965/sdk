@@ -14,11 +14,19 @@ QTMegaListener::QTMegaListener(MegaApi *megaApi, MegaListener *listener) : QObje
 QTMegaListener::~QTMegaListener()
 {
     this->listener = NULL;
-    megaApi->removeListener(this);
+    if (megaApi)
+    {
+        megaApi->removeListener(this);
+    }
 }
 
 void QTMegaListener::onRequestStart(MegaApi *api, MegaRequest *request)
 {
+    if (request->getType() == MegaRequest::TYPE_DELETE)
+    {
+        megaApi = NULL;
+    }
+
     QTMegaEvent *event = new QTMegaEvent(api, (QEvent::Type)QTMegaEvent::OnRequestStart);
     event->setRequest(request->copy());
     QCoreApplication::postEvent(this, event, INT_MIN);
@@ -80,14 +88,20 @@ void QTMegaListener::onTransferTemporaryError(MegaApi *api, MegaTransfer *transf
 void QTMegaListener::onUsersUpdate(MegaApi *api, MegaUserList *users)
 {
     QTMegaEvent *event = new QTMegaEvent(api, (QEvent::Type)QTMegaEvent::OnUsersUpdate);
-    event->setUsers(users);
+    event->setUsers(users ? users->copy() : NULL);
     QCoreApplication::postEvent(this, event, INT_MIN);
 }
 
 void QTMegaListener::onNodesUpdate(MegaApi *api, MegaNodeList *nodes)
 {
     QTMegaEvent *event = new QTMegaEvent(api, (QEvent::Type)QTMegaEvent::OnNodesUpdate);
-    event->setNodes(nodes);
+    event->setNodes(nodes ? nodes->copy() : NULL);
+    QCoreApplication::postEvent(this, event, INT_MIN);
+}
+
+void QTMegaListener::onAccountUpdate(MegaApi *api)
+{
+    QTMegaEvent *event = new QTMegaEvent(api, (QEvent::Type)QTMegaEvent::OnAccountUpdate);
     QCoreApplication::postEvent(this, event, INT_MIN);
 }
 
@@ -155,6 +169,9 @@ void QTMegaListener::customEvent(QEvent *e)
             break;
         case QTMegaEvent::OnNodesUpdate:
             if(listener) listener->onNodesUpdate(event->getMegaApi(), event->getNodes());
+            break;
+        case QTMegaEvent::OnAccountUpdate:
+            if(listener) listener->onAccountUpdate(event->getMegaApi());
             break;
         case QTMegaEvent::OnReloadNeeded:
             if(listener) listener->onReloadNeeded(event->getMegaApi());

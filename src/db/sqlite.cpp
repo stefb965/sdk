@@ -35,17 +35,86 @@ SqliteDbAccess::~SqliteDbAccess()
 {
 }
 
-DbTable* SqliteDbAccess::open(FileSystemAccess* fsaccess, string* name)
+DbTable* SqliteDbAccess::open(FileSystemAccess* fsaccess, string* name, bool recycleLegacyDB)
 {
     //Each table will use its own database object and its own file
-    //The previous implementation was closing the first database
-    //when the second one was opened.
     sqlite3* db;
-    string dbdir = dbpath + "megaclient_statecache6_" + *name + ".db";
+    string dbfile;
+    ostringstream legacyoss;
+    legacyoss << dbpath;
+    legacyoss << "megaclient_statecache";
+    legacyoss << LEGACY_DB_VERSION;
+    legacyoss << "_" << *name << ".db";
+    string legacydbpath = legacyoss.str();
+
+    ostringstream newoss;
+    newoss << dbpath;
+    newoss << "megaclient_statecache";
+    newoss << DB_VERSION;
+    newoss << "_" << *name << ".db";
+    string currentdbpath = newoss.str();
+
+    string locallegacydbpath;
+    FileAccess *fa = fsaccess->newfileaccess();
+    fsaccess->path2local(&legacydbpath, &locallegacydbpath);
+    bool legacydbavailable = fa->fopen(&locallegacydbpath);
+    delete fa;
+
+    if (legacydbavailable)
+    {
+        if (currentDbVersion == LEGACY_DB_VERSION)
+        {
+            LOG_debug << "Using a legacy DB";
+            dbfile = legacydbpath;
+        }
+        else
+        {
+            if (!recycleLegacyDB)
+            {
+                LOG_debug << "Legacy DB is outdated. Deleting.";
+                fsaccess->unlinklocal(&locallegacydbpath);
+            }
+            else
+            {
+                LOG_debug << "Trying to recycle a legacy DB";
+                string localcurrentdbpath;
+                fsaccess->path2local(&currentdbpath, &localcurrentdbpath);
+                if (fsaccess->renamelocal(&locallegacydbpath, &localcurrentdbpath, false))
+                {
+                    string suffix = "-shm";
+                    string localsuffix;
+                    fsaccess->path2local(&suffix, &localsuffix);
+
+                    string oldfile = locallegacydbpath + localsuffix;
+                    string newfile = localcurrentdbpath + localsuffix;
+                    fsaccess->renamelocal(&oldfile, &newfile, true);
+
+                    suffix = "-wal";
+                    fsaccess->path2local(&suffix, &localsuffix);
+                    oldfile = locallegacydbpath + localsuffix;
+                    newfile = localcurrentdbpath + localsuffix;
+                    fsaccess->renamelocal(&oldfile, &newfile, true);
+                    LOG_debug << "Legacy DB recycled";
+                }
+                else
+                {
+                    LOG_debug << "Unable to recycle legacy DB. Deleting.";
+                    fsaccess->unlinklocal(&locallegacydbpath);
+                }
+            }
+        }
+    }
+
+    if (!dbfile.size())
+    {
+        LOG_debug << "Using an upgraded DB";
+        dbfile = currentdbpath;
+        currentDbVersion = DB_VERSION;
+    }
 
     int rc;
 
-    rc = sqlite3_open(dbdir.c_str(), &db);
+    rc = sqlite3_open(dbfile.c_str(), &db);
 
     if (rc)
     {
@@ -65,7 +134,7 @@ DbTable* SqliteDbAccess::open(FileSystemAccess* fsaccess, string* name)
         return NULL;
     }
 
-    return new SqliteDbTable(db, fsaccess, &dbdir);
+    return new SqliteDbTable(db, fsaccess, &dbfile);
 }
 
 SqliteDbTable::SqliteDbTable(sqlite3* cdb, FileSystemAccess *fs, string *filepath)
@@ -89,7 +158,7 @@ SqliteDbTable::~SqliteDbTable()
     }
     abort();
     sqlite3_close(db);
-    LOG_debug << "Database closed";
+    LOG_debug << "Database closed " << dbfile;
 }
 
 // set cursor to first record
@@ -148,33 +217,23 @@ bool SqliteDbTable::get(uint32_t index, string* data)
     }
 
     sqlite3_stmt *stmt;
+    bool result = false;
 
-    int rc = sqlite3_prepare(db, "SELECT content FROM statecache WHERE id = ?", -1, &stmt, NULL);
-
-    if (rc)
+    if (sqlite3_prepare(db, "SELECT content FROM statecache WHERE id = ?", -1, &stmt, NULL) == SQLITE_OK)
     {
-        return false;
+        if (sqlite3_bind_int(stmt, 1, index) == SQLITE_OK)
+        {
+            if (sqlite3_step(stmt) == SQLITE_ROW)
+            {
+                data->assign((char*)sqlite3_column_blob(stmt, 0), sqlite3_column_bytes(stmt, 0));
+
+                result = true;
+            }
+        }
     }
-
-    rc = sqlite3_bind_int(stmt, 1, index);
-
-    if (rc)
-    {
-        return false;
-    }
-
-    rc = sqlite3_step(stmt);
-
-    if (rc != SQLITE_ROW)
-    {
-        return false;
-    }
-
-    data->assign((char*)sqlite3_column_blob(stmt, 0), sqlite3_column_bytes(stmt, 0));
 
     sqlite3_finalize(stmt);
-
-    return true;
+    return result;
 }
 
 // add/update record by index
@@ -186,37 +245,24 @@ bool SqliteDbTable::put(uint32_t index, char* data, unsigned len)
     }
 
     sqlite3_stmt *stmt;
+    bool result = false;
 
-    int rc = sqlite3_prepare(db, "INSERT OR REPLACE INTO statecache (id, content) VALUES (?, ?)", -1, &stmt, NULL);
-
-    if (rc)
+    if (sqlite3_prepare(db, "INSERT OR REPLACE INTO statecache (id, content) VALUES (?, ?)", -1, &stmt, NULL) == SQLITE_OK)
     {
-        return false;
-    }
-
-    rc = sqlite3_bind_int(stmt, 1, index);
-
-    if (rc)
-    {
-        return false;
-    }
-
-    rc = sqlite3_bind_blob(stmt, 2, data, len, SQLITE_STATIC);
-
-    if (rc)
-    {
-        return false;
-    }
-
-    rc = sqlite3_step(stmt);
-
-    if (rc != SQLITE_DONE)
-    {
-        return false;
+        if (sqlite3_bind_int(stmt, 1, index) == SQLITE_OK)
+        {
+            if (sqlite3_bind_blob(stmt, 2, data, len, SQLITE_STATIC) == SQLITE_OK)
+            {
+                if (sqlite3_step(stmt) == SQLITE_DONE)
+                {
+                    result = true;
+                }
+            }
+        }
     }
 
     sqlite3_finalize(stmt);
-    return true;
+    return result;
 }
 
 // delete record by index
@@ -253,6 +299,7 @@ void SqliteDbTable::begin()
         return;
     }
 
+    LOG_debug << "DB transaction BEGIN " << dbfile;
     sqlite3_exec(db, "BEGIN", 0, 0, NULL);
 }
 
@@ -264,6 +311,7 @@ void SqliteDbTable::commit()
         return;
     }
 
+    LOG_debug << "DB transaction COMMIT " << dbfile;
     sqlite3_exec(db, "COMMIT", 0, 0, NULL);
 }
 
@@ -275,6 +323,7 @@ void SqliteDbTable::abort()
         return;
     }
 
+    LOG_debug << "DB transaction ROLLBACK " << dbfile;
     sqlite3_exec(db, "ROLLBACK", 0, 0, NULL);
 }
 

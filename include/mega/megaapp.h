@@ -64,7 +64,7 @@ struct MEGA_API MegaApp
     virtual void account_details(AccountDetails*, error) { }
 
     // sessionid is undef if all sessions except the current were killed
-    virtual void sessions_killed(handle sessionid, error e) { }
+    virtual void sessions_killed(handle /*sessionid*/, error) { }
 
     // node attribute update failed (not invoked unless error != API_OK)
     virtual void setattr_result(handle, error) { }
@@ -78,8 +78,14 @@ struct MEGA_API MegaApp
     // nodes have been updated
     virtual void nodes_updated(Node**, int) { }
 
+    // nodes have been updated
+    virtual void pcrs_updated(PendingContactRequest**, int) { }
+
     // users have been added or updated
     virtual void users_updated(User**, int) { }
+
+    // the account has been modified (upgraded/downgraded)
+    virtual void account_updated() { }
 
     // password change result
     virtual void changepw_result(error) { }
@@ -100,9 +106,14 @@ struct MEGA_API MegaApp
     virtual void share_result(error) { }
     virtual void share_result(int, error) { }
 
+    // outgoing pending contact result
+    virtual void setpcr_result(handle, error, opcactions_t) { }
+    // incoming pending contact result
+    virtual void updatepcr_result(error, ipcactions_t) { }
+
     // file attribute fetch result
     virtual void fa_complete(Node*, fatype, const char*, uint32_t) { }
-    virtual int fa_failed(handle, fatype, int)
+    virtual int fa_failed(handle, fatype, int, error)
     {
         return 0;
     }
@@ -115,15 +126,27 @@ struct MEGA_API MegaApp
     virtual void enumeratequotaitems_result(handle, unsigned, unsigned, unsigned, unsigned, unsigned, const char*, const char*, const char*, const char*) { }
     virtual void enumeratequotaitems_result(error) { }
     virtual void additem_result(error) { }
-    virtual void checkout_result(error) { }
-    virtual void checkout_result(const char*) { }
+    virtual void checkout_result(const char*, error) { }
     virtual void submitpurchasereceipt_result(error) { }
+    virtual void creditcardstore_result(error) { }
+    virtual void creditcardquerysubscriptions_result(int, error) {}
+    virtual void creditcardcancelsubscriptions_result(error) {}
+    virtual void getpaymentmethods_result(int, error) {}
+    virtual void copysession_result(string*, error) { }
+    virtual void userfeedbackstore_result(error) { }
+    virtual void sendevent_result(error) { }
 
     // user invites/attributes
-    virtual void invite_result(error) { }
+    virtual void removecontact_result(error) { }
     virtual void putua_result(error) { }
     virtual void getua_result(error) { }
     virtual void getua_result(byte*, unsigned) { }
+    virtual void getua_result(TLVstore *) { }
+#ifdef DEBUG
+    virtual void delua_result(error) { }
+#endif
+
+    virtual void getuseremail_result(string *, error) { }
 
     // file node export result
     virtual void exportnode_result(error) { }
@@ -138,19 +161,71 @@ struct MEGA_API MegaApp
     virtual void checkfile_result(handle, error, byte*, m_off_t, m_time_t, m_time_t, string*, string*, string*) { }
 
     // pread result
-    virtual dstime pread_failure(error, int, void*) { return ~(dstime)0; }
-    virtual bool pread_data(byte*, m_off_t, m_off_t, void*) { return false; }
+    virtual dstime pread_failure(error, int, void*, dstime) { return ~(dstime)0; }
+    virtual bool pread_data(byte*, m_off_t, m_off_t, m_off_t, m_off_t, void*) { return false; }
 
     // event reporting result
     virtual void reportevent_result(error) { }
 
-    // global transfer queue updates (separate signaling towards the queued objects)
+    // clean rubbish bin result
+    virtual void cleanrubbishbin_result(error) { }
+
+    // get account recovery link result
+    virtual void getrecoverylink_result(error) {}
+
+    // check account recovery link result
+    virtual void queryrecoverylink_result(error) {}
+    virtual void queryrecoverylink_result(int, const char *, const char *, time_t, handle, const vector<string> *) {}
+
+    // get private key from recovery link result
+    virtual void getprivatekey_result(error, const byte * = NULL, const size_t = 0) {}
+
+    // confirm recovery link result
+    virtual void confirmrecoverylink_result(error) {}
+
+    // convirm cancellation link result
+    virtual void confirmcancellink_result(error) {}
+
+    // validation of password
+    virtual void validatepassword_result(error) {}
+
+    // get change email link result
+    virtual void getemaillink_result(error) {}
+
+    // confirm change email link result
+    virtual void confirmemaillink_result(error) {}
+
+    // get version info
+    virtual void getversion_result(int, const char*, error) {}
+
+#ifdef ENABLE_CHAT
+    // chat-related command's result
+    virtual void chatcreate_result(TextChat *, error) { }
+    virtual void chatinvite_result(error) { }
+    virtual void chatremove_result(error) { }
+    virtual void chaturl_result(string*, error) { }
+    virtual void chatgrantaccess_result(error) { }
+    virtual void chatremoveaccess_result(error) { }
+    virtual void chatupdatepermissions_result(error) { }
+    virtual void chattruncate_result(error) { }
+    virtual void chatsettitle_result(error) { }
+    virtual void chatpresenceurl_result(string*, error) { }
+    virtual void registerpushnotification_result(error) { }
+
+    virtual void chats_updated(textchat_map *, int) { }
+#endif
+
+    // global transfer queue updates
+    virtual void file_added(File*) { }
+    virtual void file_removed(File*, error) { }
+    virtual void file_complete(File*) { }
+    virtual File* file_resume(string*, direction_t*) { return NULL; }
+
     virtual void transfer_added(Transfer*) { }
     virtual void transfer_removed(Transfer*) { }
     virtual void transfer_prepare(Transfer*) { }
-    virtual void transfer_failed(Transfer*, error) { }
+    virtual void transfer_failed(Transfer*, error, dstime = 0) { }
     virtual void transfer_update(Transfer*) { }
-    virtual void transfer_limit(Transfer*) { }
     virtual void transfer_complete(Transfer*) { }
 
     // sync status updates and events
@@ -193,7 +268,7 @@ struct MEGA_API MegaApp
     // failed request retry notification
     virtual void notify_retry(dstime) { }
 
-    virtual void loadbalancing_result(string*, error) { }
+    virtual void notify_dbcommit() { }
 
     virtual ~MegaApp() { }
 };

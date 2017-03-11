@@ -65,10 +65,11 @@ public:
     bool unlinklocal(string*);
     bool rmdirlocal(string*);
     bool mkdirlocal(string*, bool);
-    bool setmtimelocal(string *, m_time_t) const;
+    bool setmtimelocal(string *, m_time_t);
     bool chdirlocal(string*) const;
     size_t lastpartlocal(string*) const;
     bool getextension(string*, char*, int) const;
+    bool expanselocalpath(string *path, string *absolutepath);
 
     void addevents(Waiter*, int);
 
@@ -76,6 +77,7 @@ public:
     bool istransientorexists(DWORD);
 
     void osversion(string*) const;
+    void statsid(string*) const;
 
     static void emptydirlocal(string*, dev_t = 0);
 
@@ -90,6 +92,8 @@ struct MEGA_API WinDirNotify : public DirNotify
 
     HANDLE hDirectory;
 
+    bool enabled;
+    bool exit;
     int active;
     string notifybuf[2];
 
@@ -109,6 +113,17 @@ struct MEGA_API WinDirNotify : public DirNotify
     ~WinDirNotify();
 };
 
+#ifndef WINDOWS_PHONE
+struct MEGA_API WinAsyncIOContext : public AsyncIOContext
+{
+    WinAsyncIOContext();
+    virtual ~WinAsyncIOContext();
+    virtual void finish();
+
+    OVERLAPPED *overlapped;
+};
+#endif
+
 class MEGA_API WinFileAccess : public FileAccess
 {
     HANDLE hFile;
@@ -118,6 +133,7 @@ public:
     WIN32_FIND_DATAW ffd;
 
     bool fopen(string*, bool, bool);
+    bool fopen(string*, bool, bool, bool);
     void updatelocalname(string*);
     bool fread(string *, unsigned, unsigned, m_off_t);
     bool frawread(byte *, unsigned, m_off_t);
@@ -125,13 +141,28 @@ public:
 
     bool sysread(byte *, unsigned, m_off_t);
     bool sysstat(m_time_t*, m_off_t*);
-    bool sysopen();
+    bool sysopen(bool async = false);
     void sysclose();
+
+    // async interface
+    virtual bool asyncavailable();
+    virtual void asyncsysopen(AsyncIOContext* context);
+    virtual void asyncsysread(AsyncIOContext* context);
+    virtual void asyncsyswrite(AsyncIOContext* context);
 
     static bool skipattributes(DWORD);
 
-    WinFileAccess();
+    WinFileAccess(Waiter *w);
     ~WinFileAccess();
+
+protected:
+#ifndef WINDOWS_PHONE
+    virtual AsyncIOContext* newasynccontext();
+    static VOID CALLBACK asyncopfinished(
+            DWORD        dwErrorCode,
+            DWORD        dwNumberOfBytesTransfered,
+            LPOVERLAPPED lpOverlapped);
+#endif
 };
 } // namespace
 

@@ -21,6 +21,7 @@
 
 #include "mega/treeproc.h"
 #include "mega/megaclient.h"
+#include "mega/logging.h"
 
 namespace mega {
 // create share keys
@@ -74,7 +75,21 @@ void TreeProcDU::proc(MegaClient*, Node* n)
 void TreeProcDel::proc(MegaClient* client, Node* n)
 {
     n->changed.removed = true;
+    n->tag = client->reqtag;
     client->notifynode(n);
+}
+
+void TreeProcApplyKey::proc(MegaClient *client, Node *n)
+{
+    if (n->attrstring)
+    {
+        n->applykey();
+        if (!n->attrstring)
+        {
+            n->changed.attrs = true;
+            client->notifynode(n);
+        }
+    }
 }
 
 #ifdef ENABLE_SYNC
@@ -111,6 +126,15 @@ void LocalTreeProcMove::proc(MegaClient*, LocalNode* localnode)
     }
 
     nc++;
+}
+
+void LocalTreeProcUpdateTransfers::proc(MegaClient *, LocalNode *localnode)
+{
+    if (localnode->transfer && localnode->transfer->localfilename.size())
+    {
+        LOG_debug << "Updating transfer path";
+        localnode->prepare();
+    }
 }
 
 #endif

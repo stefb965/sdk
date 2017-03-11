@@ -361,7 +361,7 @@ const char* JSON::getvalue()
         r = pos;
     }
 
-            storeobject();
+    storeobject();
 
     return r;
 }
@@ -510,6 +510,25 @@ void JSON::unescape(string* s)
             s->replace(i, l, &c, 1);
         }
     }
+}
+
+bool JSON::extractstringvalue(const string &json, const string &name, string *value)
+{
+    string pattern = name + "\":\"";
+    size_t pos = json.find(pattern);
+    if (pos == string::npos)
+    {
+        return false;
+    }
+
+    size_t end = json.find("\"", pos + pattern.length());
+    if (end == string::npos)
+    {
+        return false;
+    }
+
+    *value = json.substr(pos + pattern.size(), end - pos - pattern.size());
+    return true;
 }
 
 // position at start of object

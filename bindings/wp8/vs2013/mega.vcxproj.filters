@@ -81,6 +81,9 @@
     <ClInclude Include="..\..\..\include\mega\node.h">
       <Filter>SDK\Header</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\include\mega\pendingcontactrequest.h">
+      <Filter>SDK\Header</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\..\include\mega\proxy.h">
       <Filter>SDK\Header</Filter>
     </ClInclude>
@@ -139,9 +142,6 @@
       <Filter>SDK\Header</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\include\mega\wp8\megasys.h">
-      <Filter>SDK\Header</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\include\mega\wp8\megawaiter.h">
       <Filter>SDK\Header</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\include\mega\thread\cppthread.h">
@@ -243,6 +243,39 @@
     <ClInclude Include="..\MPricing.h">
       <Filter>Bindings</Filter>
     </ClInclude>
+    <ClInclude Include="..\MContactRequest.h">
+      <Filter>Bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MContactRequestList.h">
+      <Filter>Bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MInputStream.h">
+      <Filter>Bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MInputStreamAdapter.h">
+      <Filter>Bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MAccountBalance.h">
+      <Filter>Bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MAccountSession.h">
+      <Filter>Bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MAccountPurchase.h">
+      <Filter>Bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MAccountTransaction.h">
+      <Filter>Bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MStringList.h">
+      <Filter>Bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\include\mega\win32\megawaiter.h">
+      <Filter>SDK\Header</Filter>
+    </ClInclude>
+    <ClInclude Include="..\MTransferData.h">
+      <Filter>Bindings</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\src\attrmap.cpp">
@@ -299,6 +332,9 @@
     <ClCompile Include="..\..\..\src\node.cpp">
       <Filter>SDK\Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\src\pendingcontactrequest.cpp">
+      <Filter>SDK\Source</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\..\src\proxy.cpp">
       <Filter>SDK\Source</Filter>
     </ClCompile>
@@ -336,9 +372,6 @@
       <Filter>SDK\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\src\waiterbase.cpp">
-      <Filter>SDK\Source</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\src\wp8\waiter.cpp">
       <Filter>SDK\Source</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\src\win32\fs.cpp">
@@ -424,6 +457,36 @@
     </ClCompile>
     <ClCompile Include="..\..\..\src\mega_utf8proc.cpp">
       <Filter>SDK\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\MContactRequest.cpp">
+      <Filter>Bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="..\MContactRequestList.cpp">
+      <Filter>Bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="..\MInputStreamAdapter.cpp">
+      <Filter>Bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="..\MAccountBalance.cpp">
+      <Filter>Bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="..\MAccountSession.cpp">
+      <Filter>Bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="..\MAccountPurchase.cpp">
+      <Filter>Bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="..\MAccountTransaction.cpp">
+      <Filter>Bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="..\MStringList.cpp">
+      <Filter>Bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\src\win32\waiter.cpp">
+      <Filter>SDK\Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\MTransferData.cpp">
+      <Filter>Bindings</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

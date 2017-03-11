@@ -22,6 +22,7 @@
 using namespace mega;
 
 extern MegaClient* client;
+extern MegaClient* clientFolder;
 
 extern void megacli();
 
@@ -38,7 +39,6 @@ struct AppFile : public File
     // app-internal sequence number for queue management
     int seqno;
 
-    bool failed(error);
     void progress();
 
     appfile_list::iterator appxfer_it;
@@ -76,6 +76,12 @@ struct AppReadContext
     SymmCipher key;
 };
 
+class TreeProcListOutShares : public TreeProc
+{
+public:
+    void proc(MegaClient*, Node*);
+};
+
 struct DemoApp : public MegaApp
 {
     FileAccess* newfile();
@@ -95,9 +101,37 @@ struct DemoApp : public MegaApp
     void confirmsignuplink_result(error);
     void setkeypair_result(error);
 
+    virtual void getrecoverylink_result(error);
+    virtual void queryrecoverylink_result(error);
+    virtual void queryrecoverylink_result(int type, const char *email, const char *ip, time_t ts, handle uh, const vector<string> *emails);    
+    virtual void getprivatekey_result(error,  const byte *privk, const size_t len_privk);
+    virtual void confirmrecoverylink_result(error);
+    virtual void confirmcancellink_result(error);
+    virtual void validatepassword_result(error);
+    virtual void getemaillink_result(error);
+    virtual void confirmemaillink_result(error);
+
     void users_updated(User**, int);
     void nodes_updated(Node**, int);
+    void pcrs_updated(PendingContactRequest**, int);
     void nodes_current();
+
+#ifdef ENABLE_CHAT
+    void chatcreate_result(TextChat *, error);
+    void chatinvite_result(error);
+    void chatremove_result(error);
+    void chaturl_result(string *, error);
+    void chatgrantaccess_result(error);
+    void chatremoveaccess_result(error);
+    virtual void chatupdatepermissions_result(error);
+    virtual void chattruncate_result(error);
+    virtual void chatsettitle_result(error);
+
+    void chats_updated(textchat_map*, int);
+
+    void printChatInformation(TextChat *);
+    string getPrivilegeString(privilege_t priv);
+#endif
 
     int prepare_download(Node*);
 
@@ -112,15 +146,22 @@ struct DemoApp : public MegaApp
     void share_result(error);
     void share_result(int, error);
 
+    void setpcr_result(handle, error, opcactions_t);
+    void updatepcr_result(error, ipcactions_t);
+
     void fa_complete(Node*, fatype, const char*, uint32_t);
-    int fa_failed(handle, fatype, int);
+    int fa_failed(handle, fatype, int, error);
 
     void putfa_result(handle, fatype, error);
 
-    void invite_result(error);
+    void removecontact_result(error);
     void putua_result(error);
     void getua_result(error);
     void getua_result(byte*, unsigned);
+    void getua_result(TLVstore *);
+#ifdef DEBUG
+    void delua_result(error);
+#endif
 
     void account_details(AccountDetails*, bool, bool, bool, bool, bool, bool);
     void account_details(AccountDetails*, error);
@@ -138,7 +179,7 @@ struct DemoApp : public MegaApp
     void checkfile_result(handle, error, byte*, m_off_t, m_time_t, m_time_t, string*, string*, string*);
 
     dstime pread_failure(error, int, void*);
-    bool pread_data(byte*, m_off_t, m_off_t, void*);
+    bool pread_data(byte*, m_off_t, m_off_t, m_off_t, m_off_t, void*);
 
     void transfer_added(Transfer*);
     void transfer_removed(Transfer*);
@@ -187,4 +228,14 @@ struct DemoApp : public MegaApp
     void clearing();
 
     void notify_retry(dstime);
+};
+
+struct DemoAppFolder : public DemoApp
+{
+    void login_result(error);
+    void fetchnodes_result(error);
+
+    void nodes_updated(Node **, int);
+    void users_updated(User**, int) {}
+    void pcrs_updated(PendingContactRequest**, int) {}
 };

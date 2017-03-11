@@ -25,7 +25,7 @@ class OfflineTableViewController: UITableViewController, MEGATransferDelegate {
     
     var offlineDocuments = [MEGANode]()
     
-    let megaapi : MEGASdk! = (UIApplication.sharedApplication().delegate as AppDelegate).megaapi
+    let megaapi : MEGASdk! = (UIApplication.sharedApplication().delegate as! AppDelegate).megaapi
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -52,16 +52,14 @@ class OfflineTableViewController: UITableViewController, MEGATransferDelegate {
     func reloadUI() {
         offlineDocuments = [MEGANode]()
         
-        let documentDirectory = NSSearchPathForDirectoriesInDomains(NSSearchPathDirectory.DocumentDirectory, NSSearchPathDomainMask.UserDomainMask, true)[0] as String
+        let documentDirectory = NSSearchPathForDirectoriesInDomains(NSSearchPathDirectory.DocumentDirectory, NSSearchPathDomainMask.UserDomainMask, true)[0] 
         
-        if let directoryContent : Array = NSFileManager.defaultManager().contentsOfDirectoryAtPath(documentDirectory, error: nil) {
-            var i = 0
+        if let directoryContent : Array = try? NSFileManager.defaultManager().contentsOfDirectoryAtPath(documentDirectory) {
             
-            for i = 0; i < directoryContent.count; i++ {
+            for i in 0  ..< directoryContent.count {
                 let filename: String = String(directoryContent[i] as NSString)
-                let filePath = documentDirectory.stringByAppendingPathComponent(filename)
                 
-                if !(filename.lowercaseString.pathExtension == "mega") {
+                if !((filename.lowercaseString as NSString).pathExtension == "mega") {
                     if let node = megaapi.nodeForHandle(MEGASdk.handleForBase64Handle(filename)) {
                         offlineDocuments.append(node)
                     }
@@ -84,7 +82,7 @@ class OfflineTableViewController: UITableViewController, MEGATransferDelegate {
     
     
     override func tableView(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCellWithIdentifier("nodeCell", forIndexPath: indexPath) as NodeTableViewCell
+        let cell = tableView.dequeueReusableCellWithIdentifier("nodeCell", forIndexPath: indexPath) as! NodeTableViewCell
         let node = offlineDocuments[indexPath.row]
         
         cell.nameLabel.text = node.name

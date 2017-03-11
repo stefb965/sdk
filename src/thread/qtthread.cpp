@@ -22,6 +22,8 @@
 #include "mega.h"
 #include "mega/thread/qtthread.h"
 
+#define STACK_SIZE 1048576
+
 namespace mega {
 
 QtThread::QtThread()
@@ -36,6 +38,7 @@ void QtThread::run()
 
 void QtThread::start(void *(*start_routine)(void*), void *parameter)
 {
+    setStackSize(STACK_SIZE);
     this->start_routine = start_routine;
     this->pointer = parameter;
 
@@ -52,12 +55,24 @@ QtThread::~QtThread()
 
 }
 
+uint64_t QtThread::currentThreadId()
+{
+    return (uint64_t) QThread::currentThreadId();
+}
 
-
+//mutex
 QtMutex::QtMutex()
 {
     mutex = NULL;
 }
+
+QtMutex::QtMutex(bool recursive)
+{
+    mutex = NULL;
+
+    init(recursive);
+}
+
 
 void QtMutex::init(bool recursive)
 {
@@ -80,6 +95,33 @@ void QtMutex::unlock()
 QtMutex::~QtMutex()
 {
     delete mutex;
+}
+
+
+//semaphore
+QtSemaphore::QtSemaphore()
+{
+    semaphore = new QSemaphore();
+}
+
+void QtSemaphore::wait()
+{
+    semaphore->acquire();
+}
+
+int QtSemaphore::timedwait(int milliseconds)
+{
+    return semaphore->tryAcquire(1, milliseconds) ? 0 : -1;
+}
+
+void QtSemaphore::release()
+{
+    semaphore->release();
+}
+
+QtSemaphore::~QtSemaphore()
+{
+    delete semaphore;
 }
 
 } // namespace

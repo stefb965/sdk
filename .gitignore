@@ -1,3 +1,4 @@
+/SDK.log
 # Compiled Object files
 *.slo
 *.lo
@@ -21,15 +22,17 @@
 *.exe
 *.out
 *.app
-tests/api_test
+/tests/sdk_test
+/tests/misc_test
+/tests/purge_account
 examples/megacli
-doc/example/lsmega
 examples/megasimplesync
 examples/linux/megafuse
 
 # Autotool stuff
 .deps
-Makefile
+/Makefile
+/include/Makefile
 Makefile.in
 aclocal.m4
 autom4te.cache
@@ -67,6 +70,7 @@ doc/_build
 doc/api
 doc/sphinx_api
 doc/Doxyfile
+doc/example/lsmega
 
 # Editor and IDE stuff
 *~
@@ -76,47 +80,30 @@ doc/Doxyfile
 *~
 Debug
 Release
+/contrib/QtCreator/megacli.creator.user
+megaclient_statecache*
 
 # Mega SDK runtime
 *.db-journal
 
-# bindings
-bindings/php/mega.php
-bindings/php/megaapi_wrap.cpp
-bindings/php/megaapi_wrap.h
-bindings/php/php_mega.h
-
-bindings/python/mega.py
-bindings/python/megaapi_wrap.cpp
-bindings/python/megaapi_wrap.h
-		 
-bindings/java/megaapi_wrap.cpp		
-bindings/java/megaapi_wrap.h		
-# binding java: only SWIG auto-generated classes		
-bindings/java/nz/mega/sdk/MegaAccountBalance.java		
-bindings/java/nz/mega/sdk/MegaAccountDetails.java		
-bindings/java/nz/mega/sdk/MegaAccountPurchase.java		
-bindings/java/nz/mega/sdk/MegaAccountSession.java		
-bindings/java/nz/mega/sdk/MegaAccountTransaction.java		
-bindings/java/nz/mega/sdk/MegaApi.java		
-bindings/java/nz/mega/sdk/MegaError.java		
-bindings/java/nz/mega/sdk/MegaGfxProcessor.java		
-bindings/java/nz/mega/sdk/MegaGlobalListener.java		
-bindings/java/nz/mega/sdk/mega.java		
-bindings/java/nz/mega/sdk/megaJNI.java		
-bindings/java/nz/mega/sdk/MegaListener.java		
-bindings/java/nz/mega/sdk/MegaLogger.java		
-bindings/java/nz/mega/sdk/MegaNode.java		
-bindings/java/nz/mega/sdk/MegaNodeList.java		
-bindings/java/nz/mega/sdk/MegaPricing.java		
-bindings/java/nz/mega/sdk/MegaProxy.java		
-bindings/java/nz/mega/sdk/MegaRequest.java		
-bindings/java/nz/mega/sdk/MegaRequestListener.java		
-bindings/java/nz/mega/sdk/MegaShare.java		
-bindings/java/nz/mega/sdk/MegaShareList.java		
-bindings/java/nz/mega/sdk/MegaTransfer.java		
-bindings/java/nz/mega/sdk/MegaTransferListener.java		
-bindings/java/nz/mega/sdk/MegaTransferList.java		
-bindings/java/nz/mega/sdk/MegaTreeProcessor.java		
-bindings/java/nz/mega/sdk/MegaUser.java		
-bindings/java/nz/mega/sdk/MegaUserList.java
+/third_party/Makefile
+/examples/mega-cmd
+/contrib/QtCreator/MEGAcmd/MEGAcmd.pro.user
+/contrib/QtCreator/MEGAcmd/MEGAcmd
+/contrib/QtCreator/MEGAcmd/Makefile
+/contrib/QtCreator/MEGAcmd/moc_*.cpp
+examples/megacmd/build/Release_x64
+MEGAcmdServer.pro.user
+/examples/megacmd/build/megacmd/megacmd.dsc
+/examples/megacmd/build/megacmd/megacmd.spec
+/examples/megacmd/build/megacmd/megacmd_*.tar.gz
+/examples/megacmd/build/megacmd/PKGBUILD
+/contrib/QtCreator/MEGAcmd/MEGAcmdClient/MEGAclient
+/contrib/QtCreator/MEGAcmd/MEGAcmdClient/Makefile
+/contrib/QtCreator/MEGAcmd/MEGAcmdServer/MEGAcmd
+/contrib/QtCreator/MEGAcmd/MEGAcmdServer/Makefile
+/examples/mega-exec
+/examples/megacmd/build/megacmd/debian.copyright
+/examples/megacmd/client/mega-exec
+/contrib/QtCreator/MEGAcmd/MEGAcmdLoader/MEGAcmdLoader
+/contrib/QtCreator/MEGAcmd/MEGAcmdLoader/Makefile

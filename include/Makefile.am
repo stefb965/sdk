@@ -35,6 +35,8 @@ nobase_libmegainclude_HEADERS = \
 	mega/logging.h \
 	mega/waiter.h \
 	mega/proxy.h \
+	mega/pendingcontactrequest.h \
+	mega/version.h \
 	mega/crypto/cryptopp.h \
 	mega/crypto/sodium.h \
 	mega/db/sqlite.h \
@@ -47,28 +49,41 @@ nobase_libmegainclude_HEADERS = \
 	mega/gfx/external.h \
 	mega/gfx/qt.h \
 	mega/mega_utf8proc.h \
-	mega/gfx/freeimage.h
+	mega/gfx/freeimage.h \
+	mega/gfx/GfxProcCG.h
 
 if BUILD_MEGAAPI
 nobase_libmegainclude_HEADERS += megaapi.h megaapi_impl.h
 endif
 
+if ANDROID
+nobase_libmegainclude_HEADERS += \
+	mega/config-android.h \
+	mega/mega_glob.h
+endif
+
 if WIN32
 nobase_libmegainclude_HEADERS += \
 	mega/win32/megasys.h \
-    mega/win32/megafs.h \
-    mega/win32/meganet.h \
-    mega/win32/megawaiter.h \
-    mega/win32/megaconsole.h \
-    mega/win32/megaconsolewaiter.h
+	mega/win32/megafs.h \
+	mega/win32/meganet.h \
+	mega/win32/megawaiter.h \
+	mega/win32/megaconsole.h \
+	mega/win32/megaconsolewaiter.h
 else
 nobase_libmegainclude_HEADERS += \
 	mega/posix/megasys.h \
-    mega/posix/megafs.h \
-    mega/posix/meganet.h \
-    mega/posix/megawaiter.h \
-    mega/posix/megaconsole.h \
-    mega/posix/megaconsolewaiter.h
+	mega/posix/megafs.h \
+	mega/posix/meganet.h \
+	mega/posix/megawaiter.h \
+	mega/posix/megaconsole.h \
+	mega/posix/megaconsolewaiter.h
+endif
+
+if DARWIN
+if !USE_IOS
+nobase_libmegainclude_HEADERS += mega/osx/osxutils.h
+endif
 endif
 
 #noinst_HEADERS = config.h

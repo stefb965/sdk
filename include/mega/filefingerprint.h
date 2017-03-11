@@ -27,7 +27,7 @@
 
 namespace mega {
 // sparse file fingerprint, including size and mtime
-struct MEGA_API FileFingerprint
+struct MEGA_API FileFingerprint : public Cachable
 {
     m_off_t size;
     m_time_t mtime;
@@ -40,12 +40,16 @@ struct MEGA_API FileFingerprint
     bool isvalid;
 
     bool genfingerprint(FileAccess*, bool = false);
+    bool genfingerprint(InputStreamAccess*, m_time_t, bool = false);
     void serializefingerprint(string*) const;
     int unserializefingerprint(string*);
 
     FileFingerprint& operator=(FileFingerprint&);
 
     FileFingerprint();
+
+    virtual bool serialize(string*);
+    static FileFingerprint* unserialize(string*);
 };
 
 // orders transfers by file fingerprints, ordered by size / mtime / sparse CRC

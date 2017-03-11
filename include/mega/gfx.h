@@ -52,7 +52,7 @@ public:
     // handle is uploadhandle or nodehandle
     // - must respect JPEG EXIF rotation tag
     // - must save at 85% quality (120*120 pixel result: ~4 KB)
-    int gendimensionsputfa(FileAccess*, string*, handle, SymmCipher*, int = -1);
+    int gendimensionsputfa(FileAccess*, string*, handle, SymmCipher*, int = -1, bool checkAccess = true);
 
     // FIXME: read dynamically from API server
     typedef enum { THUMBNAIL120X120, PREVIEW1000x1000 } meta_t;
@@ -65,6 +65,7 @@ public:
     static const int dimensions[][2];
     
     MegaClient* client;
+    int w, h;
 
     GfxProc();
     virtual ~GfxProc() { }

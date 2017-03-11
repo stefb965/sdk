@@ -26,16 +26,16 @@ class ContactsTableViewController: UITableViewController, MEGARequestDelegate {
     var users : MEGAUserList!
     var filterUsers = [MEGAUser]()
     
-    let megaapi : MEGASdk! = (UIApplication.sharedApplication().delegate as AppDelegate).megaapi
+    let megaapi : MEGASdk! = (UIApplication.sharedApplication().delegate as! AppDelegate).megaapi
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
         users = megaapi.contacts()
         
-        for var i = 0 ; i < users.size.integerValue ; i++ {
+        for i in 0  ..< users.size.integerValue  {
             let user = users.userAtIndex(i)
-            if user.access == MEGAUserVisibility.Visible {
+            if user.visibility == MEGAUserVisibility.Visible {
                 filterUsers.append(user)
             }
         }
@@ -58,7 +58,7 @@ class ContactsTableViewController: UITableViewController, MEGARequestDelegate {
 
     
     override func tableView(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCellWithIdentifier("contactCell", forIndexPath: indexPath) as ContactTableViewCell
+        let cell = tableView.dequeueReusableCellWithIdentifier("contactCell", forIndexPath: indexPath) as! ContactTableViewCell
         let user = filterUsers[indexPath.row]
         
         cell.nameLabel.text = user.email
@@ -97,14 +97,15 @@ class ContactsTableViewController: UITableViewController, MEGARequestDelegate {
         
         switch request.type {
         case MEGARequestType.GetAttrUser:
-            for tableViewCell in tableView.visibleCells() as [ContactTableViewCell] {
+            for tableViewCell in tableView.visibleCells as! [ContactTableViewCell] {
                 if request?.email == tableViewCell.nameLabel.text {
                     let filename = request.email
-                    let avatarFilePath = NSSearchPathForDirectoriesInDomains(NSSearchPathDirectory.CachesDirectory, NSSearchPathDomainMask.UserDomainMask, true)[0].stringByAppendingPathComponent("thumbs").stringByAppendingPathComponent(filename)
-                    let fileExists = NSFileManager.defaultManager().fileExistsAtPath(avatarFilePath)
+                    let avatarURL = NSFileManager.defaultManager().URLsForDirectory(.CachesDirectory, inDomains: .UserDomainMask)[0]
+                    let avatarFilePath = avatarURL.URLByAppendingPathComponent("thumbs").URLByAppendingPathComponent(filename)
+                    let fileExists = NSFileManager.defaultManager().fileExistsAtPath(avatarFilePath.path!)
                     
                     if fileExists {
-                        tableViewCell.avatarImageView.image = UIImage(named: avatarFilePath)
+                        tableViewCell.avatarImageView.image = UIImage(named: avatarFilePath.path!)
                         tableViewCell.avatarImageView.layer.cornerRadius = tableViewCell.avatarImageView.frame.size.width/2
                         tableViewCell.avatarImageView.layer.masksToBounds = true
                     }

@@ -32,6 +32,10 @@
 #include <sys/vfs.h>
 #endif
 
+#ifdef HAVE_AIO_RT
+#include <aio.h>
+#endif
+
 #include "mega.h"
 
 #define DEBRISFOLDER ".debris"
@@ -66,7 +70,13 @@ public:
     string lastname;
 #endif
 
+#ifdef USE_IOS
+    static char *appbasepath;
+#endif
+
     bool notifyerr;
+    int defaultfilepermissions;
+    int defaultfolderpermissions;
 
     FileAccess* newfileaccess();
     DirAccess* newdiraccess();
@@ -85,26 +95,45 @@ public:
     bool unlinklocal(string*);
     bool rmdirlocal(string*);
     bool mkdirlocal(string*, bool);
-    bool setmtimelocal(string *, m_time_t) const;
+    bool setmtimelocal(string *, m_time_t);
     bool chdirlocal(string*) const;
     size_t lastpartlocal(string*) const;
     bool getextension(string*, char*, int) const;
+    bool expanselocalpath(string *path, string *absolutepath);
 
     void addevents(Waiter*, int);
     int checkevents(Waiter*);
 
     void osversion(string*) const;
+    void statsid(string*) const;
 
     static void emptydirlocal(string*, dev_t = 0);
+
+    int getdefaultfilepermissions();
+    void setdefaultfilepermissions(int);
+    int getdefaultfolderpermissions();
+    void setdefaultfolderpermissions(int);
 
     PosixFileSystemAccess(int = -1);
     ~PosixFileSystemAccess();
 };
 
+#ifdef HAVE_AIO_RT
+struct MEGA_API PosixAsyncIOContext : public AsyncIOContext
+{
+    PosixAsyncIOContext();
+    virtual ~PosixAsyncIOContext();
+    virtual void finish();
+
+    struct aiocb *aiocb;
+};
+#endif
+
 class MEGA_API PosixFileAccess : public FileAccess
 {
 public:
     int fd;
+    int defaultfilepermissions;
 
 #ifndef HAVE_FDOPENDIR
     DIR* dp;
@@ -118,11 +147,24 @@ public:
 
     bool sysread(byte *, unsigned, m_off_t);
     bool sysstat(m_time_t*, m_off_t*);
-    bool sysopen();
+    bool sysopen(bool async = false);
     void sysclose();
 
-    PosixFileAccess();
+    PosixFileAccess(Waiter *w, int defaultfilepermissions = 0600);
+
+    // async interface
+    virtual bool asyncavailable();
+    virtual void asyncsysopen(AsyncIOContext* context);
+    virtual void asyncsysread(AsyncIOContext* context);
+    virtual void asyncsyswrite(AsyncIOContext* context);
+
     ~PosixFileAccess();
+
+#ifdef HAVE_AIO_RT
+protected:
+    virtual AsyncIOContext* newasynccontext();
+    static void asyncopfinished(union sigval sigev_value);
+#endif
 };
 
 class MEGA_API PosixDirNotify : public DirNotify

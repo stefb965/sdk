@@ -43,7 +43,7 @@ public:
     void proc(MegaClient*, Node*);
 };
 
-class MEGA_API TreeProcListOutShares : public TreeProc
+class MEGA_API TreeProcApplyKey : public TreeProc
 {
 public:
     void proc(MegaClient*, Node*);
@@ -115,6 +115,12 @@ public:
     LocalTreeProcMove(Sync*, bool);
     void proc(MegaClient*, LocalNode*);
     int nc;
+};
+
+class MEGA_API LocalTreeProcUpdateTransfers : public LocalTreeProc
+{
+public:
+    void proc(MegaClient*, LocalNode*);
 };
 
 #endif

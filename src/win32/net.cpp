@@ -35,9 +35,7 @@ WinHttpIO::WinHttpIO()
 
     hWakeupEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 
-    waiter = NULL;
-    
-    chunkedok = false;
+    waiter = NULL;    
 }
 
 WinHttpIO::~WinHttpIO()
@@ -128,103 +126,6 @@ void WinHttpIO::setproxy(Proxy* proxy)
     delete autoProxy;
 }
 
-Proxy* WinHttpIO::getautoproxy()
-{
-    Proxy* proxy = new Proxy();
-    proxy->setProxyType(Proxy::NONE);
-
-    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG ieProxyConfig = { 0 };
-
-    if (WinHttpGetIEProxyConfigForCurrentUser(&ieProxyConfig) == TRUE)
-    {
-        if (ieProxyConfig.lpszProxy)
-        {
-            string proxyURL;
-            proxy->setProxyType(Proxy::CUSTOM);
-            int len = wcslen(ieProxyConfig.lpszProxy);
-            proxyURL.assign((const char*)ieProxyConfig.lpszProxy, len * sizeof(wchar_t) + 1);
-
-            // only save one proxy
-            for (int i = 0; i < len; i++)
-            {
-                wchar_t* character = (wchar_t*)(proxyURL.data() + i * sizeof(wchar_t));
-
-                if (*character == ' ' || *character == ';')
-                {
-                    proxyURL.resize(i*sizeof(wchar_t));
-                    len = i;
-                    break;
-                }
-            }
-
-            // remove protocol prefix, if any
-            for (int i = len - 1; i >= 0; i--)
-            {
-                wchar_t* character = (wchar_t*)(proxyURL.data() + i * sizeof(wchar_t));
-
-                if (*character == '/')
-                {
-                    proxyURL = proxyURL.substr((i + 1) * sizeof(wchar_t));
-                    break;
-                }
-            }
-
-            proxy->setProxyURL(&proxyURL);
-        }
-        else if (ieProxyConfig.lpszAutoConfigUrl || ieProxyConfig.fAutoDetect == TRUE)
-        {
-            WINHTTP_AUTOPROXY_OPTIONS autoProxyOptions;
-
-            if (ieProxyConfig.lpszAutoConfigUrl)
-            {
-                autoProxyOptions.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL;
-                autoProxyOptions.lpszAutoConfigUrl = ieProxyConfig.lpszAutoConfigUrl;
-                autoProxyOptions.dwAutoDetectFlags = 0;
-            }
-            else
-            {
-                autoProxyOptions.dwFlags = WINHTTP_AUTOPROXY_AUTO_DETECT;
-                autoProxyOptions.lpszAutoConfigUrl = NULL;
-                autoProxyOptions.dwAutoDetectFlags = WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A;
-            }
-
-            autoProxyOptions.fAutoLogonIfChallenged = TRUE;
-            autoProxyOptions.lpvReserved = NULL;
-            autoProxyOptions.dwReserved = 0;
-
-            WINHTTP_PROXY_INFO proxyInfo;
-
-            if (WinHttpGetProxyForUrl(hSession, L"https://g.api.mega.co.nz/", &autoProxyOptions, &proxyInfo))
-            {
-                if (proxyInfo.lpszProxy)
-                {
-                    string proxyURL;
-                    proxy->setProxyType(Proxy::CUSTOM);
-                    proxyURL.assign((const char*)proxyInfo.lpszProxy, wcslen(proxyInfo.lpszProxy) * sizeof(wchar_t));
-                    proxy->setProxyURL(&proxyURL);
-                }
-            }
-        }
-    }
-
-    if (ieProxyConfig.lpszProxy)
-    {
-        GlobalFree(ieProxyConfig.lpszProxy);
-    }
-
-    if (ieProxyConfig.lpszProxyBypass)
-    {
-        GlobalFree(ieProxyConfig.lpszProxyBypass);
-    }
-
-    if (ieProxyConfig.lpszAutoConfigUrl)
-    {
-        GlobalFree(ieProxyConfig.lpszAutoConfigUrl);
-    }
-
-    return proxy;
-}
-
 // trigger wakeup
 void WinHttpIO::httpevent()
 {
@@ -246,11 +147,6 @@ void WinHttpIO::unlock()
 void WinHttpIO::addevents(Waiter* cwaiter, int flags)
 {
     waiter = (WinWaiter*)cwaiter;
-
-    // enabled chunked transfer encoding if GetTickCount64() exists
-    // (we are on Vista or greater)
-    if (pGTC) chunkedok = true;
-
     waiter->addhandle(hWakeupEvent, flags);
     waiter->pcsHTTP = &csHTTP;
 }
@@ -315,8 +211,16 @@ VOID CALLBACK WinHttpIO::asynccallback(HINTERNET hInternet, DWORD_PTR dwContext,
                 }
 
                 LOG_debug << "Request finished with HTTP status: " << req->httpstatus;
+                req->status = (req->httpstatus == 200
+                            && (req->contentlength < 0
+                             || req->contentlength == (req->buf ? req->bufpos : (int)req->in.size())))
+                             ? REQ_SUCCESS : REQ_FAILURE;
 
-                req->status = req->httpstatus == 200 ? REQ_SUCCESS : REQ_FAILURE;
+                if (req->status == REQ_SUCCESS)
+                {
+                    httpio->lastdata = Waiter::ds;
+                    req->lastdata = Waiter::ds;
+                }
                 httpio->success = true;
             }
             else
@@ -357,6 +261,7 @@ VOID CALLBACK WinHttpIO::asynccallback(HINTERNET hInternet, DWORD_PTR dwContext,
                 if (req->httpio)
                 {
                     req->httpio->lastdata = Waiter::ds;
+                    req->lastdata = Waiter::ds;
                 }
             
                 if (httpctx->gzip)
@@ -415,10 +320,24 @@ VOID CALLBACK WinHttpIO::asynccallback(HINTERNET hInternet, DWORD_PTR dwContext,
                 if (req->httpio)
                 {
                     req->httpio->lastdata = Waiter::ds;
+                    req->lastdata = Waiter::ds;
                 }
 
                 if (!req->buf)
                 {
+                    DWORD timeLeft;
+                    DWORD timeLeftSize = sizeof(timeLeft);
+                    if (WinHttpQueryHeaders(httpctx->hRequest,
+                                            WINHTTP_QUERY_CUSTOM | WINHTTP_QUERY_FLAG_NUMBER,
+                                            L"X-MEGA-Time-Left",
+                                            &timeLeft,
+                                            &timeLeftSize,
+                                            WINHTTP_NO_HEADER_INDEX))
+                    {
+                        LOG_verbose << "Seconds left until more bandwidth quota: " << timeLeft;
+                        req->timeleft = timeLeft;
+                    }
+
                     // obtain original content length - always present if gzip is in use
                     DWORD contentLength;
                     DWORD contentLengthSize = sizeof(contentLength);
@@ -512,7 +431,7 @@ VOID CALLBACK WinHttpIO::asynccallback(HINTERNET hInternet, DWORD_PTR dwContext,
 
         case WINHTTP_CALLBACK_STATUS_SENDING_REQUEST:
         {
-            if(MegaClient::disablepkp)
+            if (MegaClient::disablepkp || !req->protect)
             {
                 break;
             }
@@ -531,7 +450,9 @@ VOID CALLBACK WinHttpIO::asynccallback(HINTERNET hInternet, DWORD_PTR dwContext,
                   && memcmp(pkey->pbData, "\x30\x82\x01\x0a\x02\x82\x01\x01\x00" APISSLMODULUS2
                                           "\x02" APISSLEXPONENTSIZE APISSLEXPONENT, 270)))
                 {
-                    LOG_err << "Certificate error. Possible MITM attack!!";
+                    LOG_err << "Invalid public key. Possible MITM attack!!";
+                    req->sslcheckfailed = true;
+
                     CertFreeCertificateContext(cert);
                     httpio->cancel(req);
                     httpio->httpevent();
@@ -539,10 +460,6 @@ VOID CALLBACK WinHttpIO::asynccallback(HINTERNET hInternet, DWORD_PTR dwContext,
                 }
 
                 CertFreeCertificateContext(cert);
-            }
-            else
-            {
-                LOG_verbose << "Unable to get server certificate. Code: " << GetLastError();
             }
 
             break;
@@ -591,7 +508,7 @@ VOID CALLBACK WinHttpIO::asynccallback(HINTERNET hInternet, DWORD_PTR dwContext,
 // POST request to URL
 void WinHttpIO::post(HttpReq* req, const char* data, unsigned len)
 {
-    LOG_debug << "POST target URL: " << req->posturl << " chunked: " << req->chunked;
+    LOG_debug << "POST target URL: " << req->posturl;
 
     if (req->binary)
     {
@@ -664,16 +581,6 @@ void WinHttpIO::post(HttpReq* req, const char* data, unsigned len)
                                     ? L"Content-Type: application/json\r\nAccept-Encoding: gzip"
                                     : L"Content-Type: application/octet-stream";
 
-                // data is sent in HTTP_POST_CHUNK_SIZE instalments to ensure
-                // semi-smooth UI progress info
-                if (req->chunkedout.size())
-                {
-                    req->outbuf.append(req->chunkedout);
-                    req->chunkedout.clear();
-                }
-
-                req->chunked = 0;
-
                 httpctx->postlen = data ? len : req->out->size();
                 httpctx->postdata = data ? data : req->out->data();
 
@@ -734,11 +641,6 @@ void WinHttpIO::post(HttpReq* req, const char* data, unsigned len)
 
     LOG_err << "Request failed";
     req->status = REQ_FAILURE;
-}
-
-// unfortunately, WinHTTP does not allow alternating reads/writes :(
-void WinHttpIO::sendchunked(HttpReq*)
-{
 }
 
 // cancel pending HTTP request

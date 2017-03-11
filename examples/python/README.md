@@ -1,10 +1,19 @@
 # Example app using Python
 
+There are two basic examples contained here. A Mega Command Line Interface
+client (`megacli`), and a simple CRUD example (create, read, update, delete
+a file).
+
+To build the required (Python) modules, see the `README.md` in
+`bindings/python/`.
+
+## Mega Command Line Interface
+
 This is a console app that uses the Python bindings of the SDK.
 
 It shows a shell like the one in the `megacli` example that allows to:
 
-- Log in to a MEGA account (`login`, `logout`) 
+- Log in to a MEGA account (`login`, `logout`)
 - Browse folders (`cd`, `ls`, `pwd`)
 - Create new folders (`mkdir`)
 - Show the inbound shared folders (`mount`)
@@ -14,22 +23,35 @@ It shows a shell like the one in the `megacli` example that allows to:
 - Change the password of the account (`passwd`)
 - Get info about the account (`whoami`)
 
-## How to build and run the project:
+Prerequisite:
 
-To build and run the project, follow these steps:
+- Installed Mega SDK with Python bindings and the Python module `cmd` (or `cmd2`).
 
-1. Install SWIG in your system (it's required to generate Python
-   bindings)
-2. Build the SDK including the option `--enable-python` in the
-   `./configure` step
-3. Install the required Python dependency `cmd` (or `cmd2`).
-4. Run the `megacli.py` file in this folder
+To start the client just run `megacli.py` from this folder.
 
-If you want to create your own Python app. You can use the `MegaApi`
+
+## Mega CRUD Example
+
+Just run `crud_example.py` from this folder.
+
+To avoid typing in credentials, you may create a `credentials.json` file with
+the following content:
+
+```
+{
+    "user": "your.email@provider.org",
+    "password": "your_supersecret_password"
+}
+```
+
+
+## To Keep In Mind
+
+If you want to create your own Python app, you can use the `MegaApi`
 object. However, these bindings are still a work in progress and have
 some inconveniences:
 
-- You can't use callback parameters out of the callbacks You can use
+- You can't use callback parameters out of the callbacks. Instead, you can use
   the `copy()` method of `MegaRequest`, `MegaTransfer` and `MegaError`
   to preserve them and to use them later.
 - You can't use objects returned by `MegaNodeList`,

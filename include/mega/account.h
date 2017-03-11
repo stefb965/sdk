@@ -75,6 +75,9 @@ struct MEGA_API AccountDetails
     // subscription information (summarized)
     int pro_level;
     char subscription_type;
+    char subscription_cycle[4];
+    m_time_t subscription_renew;
+    string subscription_method;
 
     m_time_t pro_until;
 
@@ -101,6 +104,9 @@ struct MEGA_API AccountDetails
                                         // requesting IP address (dynamic,
                                         // overage will be drawn from account
                                         // quota)
+
+    bool transfer_hist_valid;           // transfer hist valid for overquota
+                                        // accounts
 
     vector<AccountBalance> balances;
     vector<AccountSession> sessions;

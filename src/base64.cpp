@@ -67,12 +67,12 @@ unsigned char Base64::from64(byte c)
         return c - '0' + 52;
     }
 
-    if (c == '-')
+    if (c == '-' || c == '+')
     {
         return 62;
     }
 
-    if (c == '_')
+    if (c == '_' || c == '/')
     {
         return 63;
     }
@@ -121,6 +121,70 @@ int Base64::atob(const char* a, byte* b, int blen)
     }
 
     return p;
+}
+
+void Base64::itoa(int64_t val, string *result)
+{
+    byte c;
+    int64_t rest;
+    if (!result || val < 0)
+    {
+        return;
+    }
+
+    if (!val)
+    {
+        *result = "A";
+        return;
+    }
+
+    result->clear();
+    while (val)
+    {
+        rest = val % 64;
+        val /= 64;
+        c = to64(rest);
+        result->insert(result->begin(), (char) c);
+    }
+}
+
+int64_t Base64::atoi(string *val)
+{
+    if (!val)
+    {
+        return -1;
+    }
+
+    size_t len = val->size();
+    if (len == 0)
+    {
+        return -1;
+    }
+
+    size_t pos = 0;
+    int64_t res = 0;
+    int valid = 0;
+    while (pos < len)
+    {
+        byte b = from64(val->at(pos));
+        if (b == 255)
+        {
+            pos++;
+            continue;
+        }
+
+        valid++;
+        res *= 64;
+        res += b;
+        pos++;
+    }
+
+    if (!valid || res < 0)
+    {
+        return -1;
+    }
+
+    return res;
 }
 
 int Base64::btoa(const byte* b, int blen, char* a)
@@ -295,6 +359,84 @@ int Base32::atob(const char *a, byte *b, int blen)
     }
 
     return p;
+}
+
+bool URLCodec::issafe(char c)
+{
+    if (ishexdigit(c)
+            || (c >= 'a' && c <= 'z')
+            || (c >= 'A' && c <= 'Z')
+            || c == '-' || c == '.'
+            || c == '_' || c == '~')
+    {
+        return true;
+    }
+    return false;
+}
+
+char URLCodec::hexval(char c)
+{
+    return c > '9' ? (c > 'a' ? c - 'a' + 10 : c - 'A' + 10) : c - '0';
+}
+
+bool URLCodec::ishexdigit(char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+void URLCodec::escape(string *plain, string *escaped)
+{
+    if (!escaped || !plain)
+    {
+        return;
+    }
+
+    escaped->clear();
+    int len = plain->size();
+    int escapedIndex = 0;
+    for (int i = 0; i < len; i++)
+    {
+        unsigned char c = (unsigned char)plain->at(i);
+        if (issafe(c))
+        {
+            escaped->push_back(c);
+            escapedIndex++;
+        }
+        else
+        {
+            escaped->resize(escapedIndex + 3);
+            sprintf((char *)escaped->c_str() + escapedIndex, "%%%02x", c);
+            escapedIndex += 3;
+        }
+    }
+}
+
+void URLCodec::unescape(string *escaped, string *plain)
+{
+    if (!escaped || !plain)
+    {
+        return;
+    }
+
+    plain->clear();
+    plain->reserve(escaped->size());
+    int len = escaped->size();
+    for (int i = 0; i < len; i++)
+    {
+        if (escaped->at(i) == '%' && ishexdigit(escaped->at(i + 1)) && ishexdigit(escaped->at(i + 2)))
+        {
+            char c1 = hexval(escaped->at(i + 1));
+            char c2 = hexval(escaped->at(i + 2));
+            char c = 0xFF & ((c1 << 4) | c2);
+
+            plain->push_back(c);
+            i += 2;
+        }
+        else
+        {
+            plain->push_back(escaped->at(i));
+        }
+    }
 }
 
 } // namespace

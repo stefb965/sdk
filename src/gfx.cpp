@@ -102,47 +102,63 @@ void GfxProc::transform(int& w, int& h, int& rw, int& rh, int& px, int& py)
 
 // load bitmap image, generate all designated sizes, attach to specified upload/node handle
 // FIXME: move to a worker thread to keep the engine nonblocking
-int GfxProc::gendimensionsputfa(FileAccess* fa, string* localfilename, handle th, SymmCipher* key, int missing)
+int GfxProc::gendimensionsputfa(FileAccess* fa, string* localfilename, handle th, SymmCipher* key, int missing, bool checkAccess)
 {
     int numputs = 0;
 
-    if (isgfx(localfilename))
+    if (SimpleLogger::logCurrentLevel >= logDebug)
     {
-        // (this assumes that the width of the largest dimension is max)
-        if (readbitmap(fa, localfilename, dimensions[sizeof dimensions/sizeof dimensions[0]-1][0]))
-        {
-            string* jpeg = NULL;
-
-            // successively downscale the original image
-            for (int i = sizeof dimensions/sizeof dimensions[0]; i--; )
-            {
-                if (!jpeg)
-                {
-                    jpeg = new string;
-                }
-
-                if (missing & (1 << i) && resizebitmap(dimensions[i][0], dimensions[i][1], jpeg))
-                {
-                    // store the file attribute data - it will be attached to the file
-                    // immediately if the upload has already completed; otherwise, once
-                    // the upload completes
-                    client->reqtag = 0;
-                    client->putfa(th, (meta_t)i, key, jpeg);
-                    numputs++;
-
-                    jpeg = NULL;
-                }
-            }
-
-            if (jpeg)
-            {
-                delete jpeg;
-            }
-
-            freebitmap();
-        }
+        string utf8path;
+        client->fsaccess->local2path(localfilename, &utf8path);
+        LOG_debug << "Creating thumb/preview for " << utf8path;
     }
-    
+
+    // (this assumes that the width of the largest dimension is max)
+    if (readbitmap(fa, localfilename, dimensions[sizeof dimensions/sizeof dimensions[0]-1][0]))
+    {
+        string* jpeg = NULL;
+
+        // successively downscale the original image
+        for (int i = sizeof dimensions/sizeof dimensions[0]; i--; )
+        {
+            if (!jpeg)
+            {
+                jpeg = new string;
+            }
+
+            int w = dimensions[i][0];
+            int h = dimensions[i][1];
+            if (i == (sizeof dimensions/sizeof dimensions[0] - 1)
+                    && this->w < w && this->h < h )
+            {
+                LOG_debug << "Skipping upsizing of preview";
+                w = this->w;
+                h = this->h;
+            }
+
+            if (missing & (1 << i) && resizebitmap(w, h, jpeg))
+            {
+                // store the file attribute data - it will be attached to the file
+                // immediately if the upload has already completed; otherwise, once
+                // the upload completes
+                int creqtag = client->reqtag;
+                client->reqtag = 0;
+                client->putfa(th, (meta_t)i, key, jpeg, checkAccess);
+                client->reqtag = creqtag;
+                numputs++;
+
+                jpeg = NULL;
+            }
+        }
+
+        if (jpeg)
+        {
+            delete jpeg;
+        }
+
+        freebitmap();
+    }
+
     return numputs;
 }
 
@@ -155,8 +171,18 @@ bool GfxProc::savefa(string *localfilepath, GfxProc::meta_t type, string *locald
         return false;
     }
 
+    int w = dimensions[type][0];
+    int h = dimensions[type][1];
+    if (type == (sizeof dimensions/sizeof dimensions[0] - 1)
+            && this->w < w && this->h < h )
+    {
+        LOG_debug << "Skipping upsizing of local preview";
+        w = this->w;
+        h = this->h;
+    }
+
     string jpeg;
-    bool success = resizebitmap(dimensions[type][0], dimensions[type][1], &jpeg);
+    bool success = resizebitmap(w, h, &jpeg);
     freebitmap();
 
     if (!success)

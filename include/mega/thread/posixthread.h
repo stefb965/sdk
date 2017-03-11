@@ -23,9 +23,12 @@
 
 #ifndef THREAD_CLASS
 #define THREAD_CLASS PosixThread
+#define MUTEX_CLASS PosixMutex
+#define SEMAPHORE_CLASS PosixSemaphore
 
 #include "mega/thread.h"
 #include <pthread.h>
+#include <semaphore.h>
 
 namespace mega {
 class PosixThread : public Thread
@@ -36,6 +39,8 @@ public:
     void join();
     virtual ~PosixThread();
 
+    static uint64_t currentThreadId();
+
 protected:
     pthread_t *thread;
 };
@@ -44,6 +49,7 @@ class PosixMutex : public Mutex
 {
 public:
     PosixMutex();
+    PosixMutex(bool recursive);
     virtual void init(bool recursive);
     virtual void lock();
     virtual void unlock();
@@ -52,6 +58,21 @@ public:
 protected:
     pthread_mutex_t *mutex;
     pthread_mutexattr_t *attr;
+};
+
+class PosixSemaphore : public Semaphore
+{
+public:
+    PosixSemaphore();
+    virtual void release();
+    virtual void wait();
+    virtual int timedwait(int milliseconds);
+    virtual ~PosixSemaphore();
+
+protected:
+    unsigned int count;
+    pthread_mutex_t mtx;
+    pthread_cond_t cv;
 };
 
 } // namespace

@@ -23,21 +23,27 @@
 #define MEGA_WIN32_OS_H 1
 
 #ifdef HAVE_CONFIG_H
-// platform dependent constants
-#include "mega/config.h"
+  // platform dependent constants
+  #include "mega/config.h"
 #endif
 
 // FIXME: move to autoconf
-#define __STDC_FORMAT_MACROS
+#ifndef __STDC_FORMAT_MACROS
+  #define __STDC_FORMAT_MACROS
+#endif
 
-// (inttypes.h is not present in Microsoft Visual Studio)
-#ifdef _MSC_VER
- #define PRIu32 "I32u"
- #define PRIu64 "I64u"
- #define PRId64 "I64d"
- #define PRIi64 "I64i"
+#ifdef WINDOWS_PHONE
+#define __STDC_LIMIT_MACROS
+#endif
+
+// (inttypes.h is not present in Microsoft Visual Studio < 2015)
+#if (defined (MSC_VER) && (_MSC_VER < 1900)) && !defined(HAVE_INTTYPES_H)
+  #define PRIu32 "I32u"
+  #define PRIu64 "I64u"
+  #define PRId64 "I64d"
+  #define PRIi64 "I64i"
 #else
- #include <inttypes.h>
+  #include <inttypes.h>
 #endif
 
 #include <iostream>
@@ -45,10 +51,12 @@
 #include <string>   // the MEGA SDK assumes writable, contiguous string::data()
 #include <sstream>
 #include <map>
+#include <deque>
 #include <set>
 #include <iterator>
 #include <queue>
 #include <list>
+#include <functional>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,32 +66,30 @@
 #include <memory.h>
 #include <time.h>
 
+#if defined(USE_PTHREAD) && defined (__MINGW32__)
+#include <sys/time.h>		
+#endif
+
 #include <specstrings.h>
 #include <winsock2.h>
 #include <windows.h>
 
 #ifndef WINDOWS_PHONE
- #include <Wincrypt.h>
- #include <Winhttp.h>
+ #include <wincrypt.h>
+ #include <winhttp.h>
+ #include <shlwapi.h>
 #endif
 
 #include <shellapi.h>
 
 #define atoll _atoi64
-#define snprintf _snprintf
-#define _CRT_SECURE_NO_WARNINGS
+#define snprintf mega_snprintf
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#define strtoull _strtoui64
 
-// FIXME: move to auto-generated file
-#ifndef MEGA_MAJOR_VERSION
-#define MEGA_MAJOR_VERSION 2
-#endif
-
-#ifndef MEGA_MINOR_VERSION
-#define MEGA_MINOR_VERSION 5
-#endif
-
-#ifndef MEGA_MICRO_VERSION
-#define MEGA_MICRO_VERSION 0
+#ifndef _CRT_SECURE_NO_WARNINGS
+  #define _CRT_SECURE_NO_WARNINGS
 #endif
 
 #include <conio.h>

@@ -21,6 +21,7 @@
 
 #include "mega/db.h"
 #include "mega/utils.h"
+#include "mega/logging.h"
 
 namespace mega {
 DbTable::DbTable()
@@ -43,6 +44,7 @@ bool DbTable::put(uint32_t type, Cachable* record, SymmCipher* key)
     {
         //Don't return false if there are errors in the serialization
         //to let the SDK continue and save the rest of records
+        LOG_warn << "Serialization failed: " << type;
         return true;
     }
 
@@ -76,4 +78,10 @@ bool DbTable::next(uint32_t* type, string* data, SymmCipher* key)
 
     return false;
 }
+
+DbAccess::DbAccess()
+{
+    currentDbVersion = LEGACY_DB_VERSION;
+}
+
 } // namespace

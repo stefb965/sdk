@@ -1774,16 +1774,20 @@ MegaTransferPrivate *MegaTransferPrivate::unserialize(string *d)
 
     d->erase(0, ptr - d->data());
 
-    MegaNodePrivate *publicNode = MegaNodePrivate::unserialize(d);
-    if (!publicNode)
+    if (isPublic)
     {
-        LOG_err << "MegaTransfer unserialization failed - unable to unserialize MegaNode";
-        delete transfer;
-        return NULL;
+        MegaNodePrivate *publicNode = MegaNodePrivate::unserialize(d);
+        if (!publicNode)
+        {
+            LOG_err << "MegaTransfer unserialization failed - unable to unserialize MegaNode";
+            delete transfer;
+            return NULL;
+        }
+
+        transfer->setPublicNode(publicNode);
+        delete publicNode;
     }
 
-    transfer->setPublicNode(publicNode);
-    delete publicNode;
     return transfer;
 }
 
@@ -1794,7 +1798,6 @@ MegaRegExp *MegaRequestPrivate::getRegExp() const
 }
 #endif
 
-#ifdef ENABLE_SYNC
 void MegaTransferPrivate::setTag(int tag)
 {
 	this->tag = tag;
@@ -2188,6 +2191,28 @@ MegaRequestPrivate::MegaRequestPrivate(int type, MegaRequestListener *listener)
     {
         megaPricing = NULL;
     }
+
+#ifdef ENABLE_CHAT
+    if(type == MegaRequest::TYPE_CHAT_CREATE)
+    {
+        this->chatPeerList = new MegaTextChatPeerListPrivate();
+    }
+    else
+    {
+        this->chatPeerList = NULL;
+    }
+
+    if(type == MegaRequest::TYPE_CHAT_FETCH)
+    {
+        this->chatList = new MegaTextChatListPrivate();
+    }
+    else
+    {
+        this->chatList = NULL;
+    }
+#endif
+
+    stringMap = NULL;
 }
 
 #ifdef ENABLE_REGEXP
@@ -3680,7 +3705,6 @@ void MegaApiImpl::init(MegaApi *api, const char *appKey, MegaGfxProcessor* proce
     {
         this->appKey = appKey;
     }
-
     client = new MegaClient(this, waiter, httpio, fsAccess, dbAccess, gfxAccess, appKey, userAgent);
 
 #if defined(_WIN32) && !defined(WINDOWS_PHONE)
@@ -3827,8 +3851,7 @@ char *MegaApiImpl::getMyFingerprint()
     return result;
 }
 
-#endif  // ENABLE_SYNC
-#endif
+#endif  // ENABLE_CHAT
 
 void MegaApiImpl::setLogLevel(int logLevel)
 {
@@ -6035,6 +6058,11 @@ void MegaApiImpl::syncFolder(const char *localFolder, MegaNode *megaFolder, Mega
     }
 
     request->setListener(listener);
+
+#ifdef ENABLE_REGEXP
+    request->setRegExp(regExp);
+#endif
+
     requestQueue.push(request);
     waiter->notify();
 }
@@ -6051,6 +6079,9 @@ void MegaApiImpl::resumeSync(const char *localFolder, long long localfp, MegaNod
 
     MegaRequestPrivate *request = new MegaRequestPrivate(MegaRequest::TYPE_ADD_SYNC);
     request->setListener(listener);
+#ifdef ENABLE_REGEXP
+    request->setRegExp(regExp);
+#endif
     if(megaFolder) request->setNodeHandle(megaFolder->getHandle());
     if(localFolder)
     {
@@ -6085,6 +6116,9 @@ void MegaApiImpl::resumeSync(const char *localFolder, long long localfp, MegaNod
         {
             MegaSyncPrivate *sync = new MegaSyncPrivate(client->syncs.back());
             sync->setListener(request->getSyncListener());
+#ifdef ENABLE_REGEXP
+            sync->setRegExp(regExp);
+#endif
             syncMap[-nextTag] = sync;
 
             request->setNumber(client->syncs.back()->fsfp);
@@ -13725,6 +13759,9 @@ void MegaApiImpl::sendPendingRequests()
             {
                 MegaSyncPrivate *sync = new MegaSyncPrivate(client->syncs.back());
                 sync->setListener(request->getSyncListener());
+#ifdef ENABLE_REGEXP
+                sync->setRegExp(request->getRegExp());
+#endif
                 syncMap[-nextTag] = sync;
 
                 request->setNumber(client->syncs.back()->fsfp);
@@ -14946,6 +14983,9 @@ MegaSyncPrivate::MegaSyncPrivate(Sync *sync)
     this->fingerprint = sync->fsfp;
     this->state = sync->state;
     this->listener = NULL;
+#ifdef ENABLE_REGEXP
+    this->regExp = NULL;
+#endif
 }
 
 MegaSyncPrivate::MegaSyncPrivate(MegaSyncPrivate *sync)
@@ -14956,10 +14996,17 @@ MegaSyncPrivate::MegaSyncPrivate(MegaSyncPrivate *sync)
     this->setLocalFingerprint(sync->getLocalFingerprint());
     this->setState(sync->getState());
     this->setListener(sync->getListener());
+#ifdef ENABLE_REGEXP
+    this->regExp = NULL;
+    this->setRegExp(sync->getRegExp());
+#endif
 }
 
 MegaSyncPrivate::~MegaSyncPrivate()
 {
+#ifdef ENABLE_REGEXP
+    delete regExp;
+#endif
 }
 
 MegaSync *MegaSyncPrivate::copy()

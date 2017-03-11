@@ -688,10 +688,8 @@ protected:
     long long fingerprint;
     MegaSyncListener *listener;
     int state;
-
-private:
-    MegaSyncPrivate(MegaSyncPrivate &sync);
 };
+
 #endif  // ENABLE_SYNC
 
 
@@ -1564,8 +1562,6 @@ class MegaApiImpl : public MegaApp
         string getLocalPath(MegaNode *node);
         long long getNumLocalNodes();
 
-
-
 #ifdef ENABLE_REGEXP
         bool is_syncable(const char* name, const char *path = NULL, MegaRegExp *rExp = NULL);
 #else
@@ -1583,7 +1579,6 @@ class MegaApiImpl : public MegaApp
 #endif
         char *getBlockedPath();
 #endif
-
         void update();
         bool isWaiting();
         bool areServersBusy();

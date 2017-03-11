@@ -9518,8 +9518,6 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
                     LOG_debug << "Non transient error creating folder";
                 }
             }
-
-            localpath->resize(t);
         }
 
         localpath->resize(t);
